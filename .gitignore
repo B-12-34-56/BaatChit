@@ -20,3 +20,11 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# linting and formatting
+.eslintcache
+.prettier*
+
+# jest
+/jest.config.js
+/coverage/
