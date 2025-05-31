@@ -1,21 +1,24 @@
-// Import the functions needed from the SDKs needed
+// Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
+import { getAnalytics } from "firebase/analytics";
 
-// Web app's Firebase configuration
+// Your web app's Firebase configuration
 const firebaseConfig = {
-  apiKey: process.env.REACT_APP_FIREBASE_KEY,
-  authDomain: "baatchit-noobmaster432.firebaseapp.com",
-  projectId: "baatchit-noobmaster432",
-  storageBucket: "baatchit-noobmaster432.appspot.com",
-  messagingSenderId: "139988169705",
-  appId: "1:139988169705:web:bf1f5bcb2f1f6cd5811178",
+  apiKey: "AIzaSyDQEmgORaQ_IYo980WmcjAZXHdvXhSxz2E",
+  authDomain: "messagingapp-cc6ec.firebaseapp.com",
+  projectId: "messagingapp-cc6ec",
+  storageBucket: "messagingapp-cc6ec.appspot.com",
+  messagingSenderId: "511694963453",
+  appId: "1:511694963453:web:e8066316c37d7768b73494",
+  measurementId: "G-207JCH66B2"
 };
 
 // Initialize Firebase
 export const app = initializeApp(firebaseConfig);
+export const analytics = getAnalytics(app);
 export const auth = getAuth();
 export const storage = getStorage();
 export const db = getFirestore();
