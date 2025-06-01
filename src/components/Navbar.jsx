@@ -2,9 +2,11 @@ import { signOut } from 'firebase/auth'
 import React, { useContext } from 'react'
 import { AuthContext } from '../context/AuthContext'
 import { auth } from '../firebase'
+import { useNavigate } from 'react-router-dom'
 
 const Navbar = () => {
   const {currentUser} = useContext(AuthContext);
+  const navigate = useNavigate();
 
   return (
     <div style={{
@@ -26,6 +28,7 @@ const Navbar = () => {
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <img src={currentUser.photoURL} alt="" style={{ width: 32, height: 32, borderRadius: '50%', objectFit: 'cover', boxShadow: '0 1px 4px rgba(44,62,80,0.10)' }} />
         <span style={{ fontWeight: 600, fontSize: 15, color: '#3a3a5a' }}>{currentUser.displayName}</span>
+        <button onClick={() => navigate('/profile')} style={{ background: 'none', border: 'none', color: '#667eea', fontWeight: 600, fontSize: 15, cursor: 'pointer' }}>Profile</button>
         <button
           onClick={() => signOut(auth)}
           style={{
