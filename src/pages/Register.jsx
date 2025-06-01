@@ -55,13 +55,13 @@ const Register = () => {
   };
 
   const handleKey = (e) => {
-    e.code === "Enter" && handleSubmit();
+    e.code === "Enter" && handleSubmit(e);
   };
 
   return (
     <div className="formContainer">
       <div className="formWrapper">
-        <span className="logo">BaatChit</span>
+        <span className="logo">Bundi/Kitab</span>
         <span className="title">Register</span>
         <form onSubmit={handleSubmit} onKeyDown={handleKey}>
           <input type="text" placeholder="display name" />
