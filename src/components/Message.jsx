@@ -12,25 +12,51 @@ const Message = ({ message }) => {
     ref.current?.scrollIntoView({ behavior: "smooth" });
   }, [message]);
 
+  const isOwner = message.senderId === currentUser.uid;
+
   return (
     <div
       ref={ref}
-      className={`message ${message.senderId === currentUser.uid && "owner"}`}
+      style={{
+        display: 'flex',
+        flexDirection: isOwner ? 'row-reverse' : 'row',
+        alignItems: 'flex-end',
+        marginBottom: 18,
+        gap: 14,
+      }}
     >
-      <div className="messageInfo">
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: isOwner ? 'flex-end' : 'flex-start' }}>
         <img
-          src={
-            message.senderId === currentUser.uid
-              ? currentUser.photoURL
-              : data.user.photoURL
-          }
+          src={isOwner ? currentUser.photoURL : data.user.photoURL}
           alt=""
+          style={{
+            width: 38,
+            height: 38,
+            borderRadius: '50%',
+            objectFit: 'cover',
+            boxShadow: '0 1px 4px rgba(44,62,80,0.10)',
+            marginBottom: 4,
+          }}
         />
-        <span>just now</span>
+        <span style={{ fontSize: 11, color: '#aaa', marginTop: 2 }}>just now</span>
       </div>
-      <div className="messageContent">
-        <p>{message.text}</p>
-        {message.img && <img src={message.img} alt="" />}
+      <div style={{
+        maxWidth: 340,
+        background: isOwner ? 'linear-gradient(90deg, #667eea 0%, #764ba2 100%)' : '#f7f8fa',
+        color: isOwner ? 'white' : '#222',
+        borderRadius: isOwner ? '16px 4px 16px 16px' : '4px 16px 16px 16px',
+        padding: '12px 18px',
+        fontSize: 15,
+        fontWeight: 500,
+        boxShadow: '0 2px 8px rgba(44,62,80,0.08)',
+        wordBreak: 'break-word',
+        position: 'relative',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: isOwner ? 'flex-end' : 'flex-start',
+      }}>
+        <p style={{ margin: 0 }}>{message.text}</p>
+        {message.img && <img src={message.img} alt="" style={{ marginTop: 8, maxWidth: 220, borderRadius: 10, boxShadow: '0 1px 4px rgba(44,62,80,0.10)' }} />}
       </div>
     </div>
   );
