@@ -110,6 +110,11 @@ const Login = () => {
             </span>
           )}
         </form>
+        <p style={{ marginTop: 8, textAlign: 'right', width: '100%' }}>
+          <a href="/reset-password" style={{ color: '#667eea', fontWeight: 500, textDecoration: 'underline', cursor: 'pointer' }}>
+            Forgot password?
+          </a>
+        </p>
         <p style={{ marginTop: 18, color: '#888', fontSize: 15 }}>
           Don't have an account?{' '}
           <Link to="/register" style={{ color: '#667eea', fontWeight: 600, textDecoration: 'none' }}>Register</Link>

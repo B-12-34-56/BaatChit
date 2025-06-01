@@ -2,6 +2,7 @@ import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Home from "./pages/Home";
 import Upload from "./pages/Upload";
+import ResetPassword from "./pages/ResetPassword";
 import "./style.scss";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { useContext } from "react";
@@ -30,6 +31,7 @@ function App() {
           />
           <Route path="register" element={<Register />} />
           <Route path="login" element={<Login />} />
+          <Route path="reset-password" element={<ResetPassword />} />
           <Route path="upload" element={
             <ProtectedRoute>
               <Upload />
