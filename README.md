@@ -82,6 +82,9 @@ yarn test
 
 ## 🔒 Security
 - Review and update Firebase security rules regularly.
+- **After editing Firestore or Realtime Database rules locally, you must publish them:**
+  - In the Firebase Console: [https://console.firebase.google.com/](https://console.firebase.google.com/)
+  - Or with the CLI: `firebase deploy --only firestore:rules database:rules`
 
 ## 📄 License
 MIT

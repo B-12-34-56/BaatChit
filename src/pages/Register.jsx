@@ -5,6 +5,8 @@ import { auth, storage, db } from "../firebase";
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import { doc, setDoc } from "firebase/firestore";
 import { Link, useNavigate } from 'react-router-dom';
+import { toast, ToastContainer } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 
 const Register = () => {
   const [err, setErr] = useState(false);
@@ -55,14 +57,15 @@ const Register = () => {
       await setDoc(doc(db, "userChats", res.user.uid), {});
 
       setLoading(false);
-      navigate("/");
+      toast.success("Registration successful! Redirecting...");
+      setTimeout(() => navigate("/"), 1500);
     } catch (err) {
       console.error("Registration error:", err);
       setErr(true);
       if (err.code === "auth/email-already-in-use") {
         setErrMsg("This email is already used");
       } else {
-        setErrMsg("");
+        setErrMsg(err.message || "Something went Wrong!");
       }
       setLoading(false);
     }
@@ -88,13 +91,14 @@ const Register = () => {
       justifyContent: 'center',
       fontFamily: 'Inter, Segoe UI, Arial, sans-serif',
     }}>
+      <ToastContainer position="top-center" autoClose={1400} hideProgressBar={false} newestOnTop closeOnClick pauseOnFocusLoss draggable pauseOnHover />
       <div style={{
         background: 'white',
         borderRadius: 24,
         boxShadow: '0 8px 32px rgba(44, 62, 80, 0.15)',
-        padding: '40px 32px',
-        width: 370,
-        maxWidth: '90vw',
+        padding: '48px 48px',
+        width: 420,
+        maxWidth: '98vw',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
@@ -168,7 +172,7 @@ const Register = () => {
           </button>
           {err && (
             <span style={{ color: "#e53e3e", fontSize: "13px", fontWeight: 500, display: 'block', marginTop: 4 }}>
-              {errMsg || "Something went Wrong!"}
+              {errMsg}
             </span>
           )}
         </form>

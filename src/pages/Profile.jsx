@@ -57,8 +57,8 @@ const Profile = () => {
   };
 
   return (
-    <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Inter, Segoe UI, Arial, sans-serif' }}>
-      <div style={{ background: 'white', borderRadius: 24, boxShadow: '0 8px 32px rgba(44, 62, 80, 0.15)', padding: '40px 32px', width: 370, maxWidth: '90vw', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+    <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Inter, Segoe UI, Arial, sans-serif', padding: '32px 0' }}>
+      <div style={{ background: 'white', borderRadius: 24, boxShadow: '0 8px 32px rgba(44, 62, 80, 0.15)', padding: '48px 48px', width: 520, maxWidth: '98vw', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
         <button onClick={() => navigate('/')} style={{ alignSelf: 'flex-start', marginBottom: 12, background: 'none', border: 'none', color: '#667eea', fontWeight: 600, fontSize: 15, cursor: 'pointer' }}>← Back</button>
         <span style={{ fontWeight: 800, fontSize: 28, background: 'linear-gradient(90deg, #667eea 0%, #764ba2 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginBottom: 8 }}>Profile</span>
         <form onSubmit={handleSave} style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>

@@ -21,16 +21,31 @@ const Search = () => {
   const { currentUser } = useContext(AuthContext);
 
   const handleSearch = async () => {
-    const q = query(
-      collection(db, "users"),
-      where("displayName", "==", username)
-    );
-
+    setErr(false);
+    setUser(null);
+    let q = query(collection(db, "users"));
     try {
       const querySnapshot = await getDocs(q);
-      querySnapshot.forEach((doc) => {
-        setUser(doc.data());
+      let results = [];
+      querySnapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        if (!username) {
+          results.push({ uid: docSnap.id, ...data });
+        } else if (username.includes('@')) {
+          if (data.email && data.email.toLowerCase() === username.toLowerCase()) {
+            results.push({ uid: docSnap.id, ...data });
+          }
+        } else {
+          if (data.displayName && data.displayName.toLowerCase().includes(username.toLowerCase())) {
+            results.push({ uid: docSnap.id, ...data });
+          }
+        }
       });
+      if (results.length === 0) {
+        setErr(true);
+      } else {
+        setUser(results);
+      }
     } catch (error) {
       setErr(true);
     }
@@ -40,12 +55,12 @@ const Search = () => {
     e.code === "Enter" && handleSearch();
   };
 
-  const handleSelect = async () => {
+  const handleSelect = async (selectedUser) => {
     // check whether the group(chats in firestore) exists, if not create
     const combinedId =
-      currentUser.uid > user.uid
-        ? currentUser.uid + user.uid
-        : user.uid + currentUser.uid;
+      currentUser.uid > selectedUser.uid
+        ? currentUser.uid + selectedUser.uid
+        : selectedUser.uid + currentUser.uid;
     try {
       const res = await getDoc(doc(db, "chats", combinedId));
 
@@ -59,15 +74,15 @@ const Search = () => {
         await updateDoc(
           doc(db, "userChats", currentUser.uid), {
             [combinedId + ".userInfo"]: {
-              uid: user.uid,
-              displayName: user.displayName,
-              photoURL: user.photoURL,
+              uid: selectedUser.uid,
+              displayName: selectedUser.displayName,
+              photoURL: selectedUser.photoURL,
             },
             [combinedId + ".date"]: serverTimestamp(),
         });
 
         await updateDoc(
-          doc(db, "userChats", user.uid), {
+          doc(db, "userChats", selectedUser.uid), {
             [combinedId + ".userInfo"]: {
               uid: currentUser.uid,
               displayName: currentUser.displayName,
@@ -136,9 +151,10 @@ const Search = () => {
           User not found!
         </span>
       )}
-      {user && (
+      {user && Array.isArray(user) && user.map(u => (
         <div
-          onClick={handleSelect}
+          key={u.uid}
+          onClick={() => handleSelect(u)}
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -159,12 +175,13 @@ const Search = () => {
           onMouseOver={e => e.currentTarget.style.background = '#f0f4ff'}
           onMouseOut={e => e.currentTarget.style.background = '#fff'}
         >
-          <img src={user.photoURL} alt="" style={{ width: 36, height: 36, borderRadius: '50%', objectFit: 'cover', boxShadow: '0 1px 4px rgba(44,62,80,0.10)' }} />
+          <img src={u.photoURL} alt="" style={{ width: 36, height: 36, borderRadius: '50%', objectFit: 'cover', boxShadow: '0 1px 4px rgba(44,62,80,0.10)' }} />
           <div>
-            <span style={{ fontWeight: 700, fontSize: 15, color: '#3a3a5a' }}>{user.displayName}</span>
+            <span style={{ fontWeight: 700, fontSize: 15, color: '#3a3a5a' }}>{u.displayName}</span>
+            <span style={{ fontSize: 13, color: '#888', marginLeft: 8 }}>{u.email}</span>
           </div>
         </div>
-      )}
+      ))}
     </div>
   );
 };
