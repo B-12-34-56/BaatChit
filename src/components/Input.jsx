@@ -1,5 +1,4 @@
 import React, { useContext, useState } from "react";
-import Img from "../img/img.png";
 import Attach from "../img/attach.png";
 import { AuthContext } from "../context/AuthContext";
 import { ChatContext } from "../context/ChatContext";
@@ -83,15 +82,15 @@ const Input = () => {
       />
       <div className="send">
         <img src={Attach} alt="" />
+        <label htmlFor="file" style={{ cursor: "pointer" }} onClick={() => window.location.href = '/upload'}>
+          <img src={require("../img/react-1-logo-black-and-white (1).png")} alt="Upload to S3" />
+        </label>
         <input
           type="file"
           style={{ display: "none" }}
           id="file"
           onChange={(e) => setImg(e.target.files[0])}
         />
-        <label htmlFor="file">
-          <img src={Img} alt="" />
-        </label>
         <button onClick={handleSend}>Send</button>
       </div>
     </div>
