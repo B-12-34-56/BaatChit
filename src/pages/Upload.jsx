@@ -58,14 +58,71 @@ export default function Upload() {
   };
 
   return (
-    <div style={{ maxWidth: 500, margin: '40px auto', padding: 24, background: '#fff', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
-      <h2>Upload Image to S3</h2>
-      <input type="file" accept="image/*" onChange={handleFileChange} disabled={uploading} />
-      {file && <div style={{ margin: '12px 0' }}>{file.name} ({Math.round(file.size / 1024)} KB)</div>}
-      <button onClick={handleUpload} disabled={uploading || !file} style={{ padding: '8px 20px', background: '#2196F3', color: 'white', border: 'none', borderRadius: 4, cursor: uploading ? 'not-allowed' : 'pointer' }}>
-        {uploading ? 'Uploading...' : 'Upload'}
-      </button>
-      <UploadStatus message={status.message} type={status.type} visible={status.show} onClose={() => setStatus({ ...status, show: false })} />
+    <div style={{
+      minHeight: '100vh',
+      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontFamily: 'Inter, Segoe UI, Arial, sans-serif',
+    }}>
+      <div style={{
+        background: 'white',
+        borderRadius: 24,
+        boxShadow: '0 8px 32px rgba(44, 62, 80, 0.15)',
+        padding: '40px 32px',
+        width: 420,
+        maxWidth: '95vw',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+      }}>
+        <h2 style={{
+          fontWeight: 800,
+          fontSize: 28,
+          background: 'linear-gradient(90deg, #667eea 0%, #764ba2 100%)',
+          WebkitBackgroundClip: 'text',
+          WebkitTextFillColor: 'transparent',
+          marginBottom: 18,
+        }}>Upload Image to S3</h2>
+        <input
+          type="file"
+          accept="image/*"
+          onChange={handleFileChange}
+          disabled={uploading}
+          style={{
+            margin: '18px 0 8px 0',
+            fontSize: 15,
+            border: 'none',
+            background: 'none',
+            color: '#667eea',
+            cursor: uploading ? 'not-allowed' : 'pointer',
+          }}
+        />
+        {file && <div style={{ margin: '12px 0', color: '#444', fontWeight: 500 }}>{file.name} ({Math.round(file.size / 1024)} KB)</div>}
+        <button
+          onClick={handleUpload}
+          disabled={uploading || !file}
+          style={{
+            width: '100%',
+            padding: '12px 0',
+            background: uploading || !file ? 'linear-gradient(90deg, #b3b3b3 0%, #b3b3b3 100%)' : 'linear-gradient(90deg, #667eea 0%, #764ba2 100%)',
+            color: 'white',
+            fontWeight: 700,
+            fontSize: 16,
+            border: 'none',
+            borderRadius: 8,
+            marginTop: 12,
+            marginBottom: 8,
+            boxShadow: '0 2px 8px rgba(44, 62, 80, 0.10)',
+            cursor: uploading || !file ? 'not-allowed' : 'pointer',
+            transition: 'background 0.2s',
+          }}
+        >
+          {uploading ? 'Uploading...' : 'Upload'}
+        </button>
+        <UploadStatus message={status.message} type={status.type} visible={status.show} onClose={() => setStatus({ ...status, show: false })} />
+      </div>
     </div>
   );
 } 

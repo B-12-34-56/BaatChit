@@ -9,9 +9,10 @@ import {
   Timestamp,
   updateDoc,
 } from "firebase/firestore";
-import { db, storage } from "../firebase";
+import { db, storage, dbRealtime } from "../firebase";
 import { v4 as uuid } from "uuid";
 import { getDownloadURL, ref, uploadBytesResumable } from "firebase/storage";
+import { ref as dbRef, push, serverTimestamp as rtdbTimestamp } from "firebase/database";
 
 const Input = () => {
   const [text, setText] = useState("");
@@ -21,34 +22,31 @@ const Input = () => {
   const { data } = useContext(ChatContext);
 
   const handleSend = async () => {
+    let imgUrl = null;
     if (img) {
       const storageRef = ref(storage, uuid());
-
       await uploadBytesResumable(storageRef, img).then(() => {
         getDownloadURL(storageRef).then(async (downloadURL) => {
-            await updateDoc(doc(db, "chats", data.chatId), {
-              messages: arrayUnion({
-                id: uuid(),
-                text,
-                senderId: currentUser.uid,
-                date: Timestamp.now(),
-                img: downloadURL,
-              }),
-            });
+          imgUrl = downloadURL;
+          // After upload, send message to Realtime DB
+          await push(dbRef(dbRealtime, `userChats/${data.chatId}/messages`), {
+            senderUid: currentUser.uid,
+            text,
+            img: imgUrl,
+            timestamp: rtdbTimestamp(),
           });
-        }
-      );
+        });
+      });
     } else {
-      await updateDoc(doc(db, "chats", data.chatId), {
-        messages: arrayUnion({
-          id: uuid(),
-          text,
-          senderId: currentUser.uid,
-          date: Timestamp.now(),
-        }),
+      // Send message to Realtime DB
+      await push(dbRef(dbRealtime, `userChats/${data.chatId}/messages`), {
+        senderUid: currentUser.uid,
+        text,
+        timestamp: rtdbTimestamp(),
       });
     }
 
+    // Update userChats metadata in Firestore
     await updateDoc(doc(db, "userChats", currentUser.uid), {
       [data.chatId + ".lastMessage"]: {
         text,
