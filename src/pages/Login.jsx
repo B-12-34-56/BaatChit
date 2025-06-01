@@ -67,6 +67,7 @@ const Login = () => {
         flexDirection: 'column',
         alignItems: 'center',
       }}>
+        <button onClick={() => navigate('/')} style={{ alignSelf: 'flex-start', marginBottom: 12, background: 'none', border: 'none', color: '#667eea', fontWeight: 600, fontSize: 15, cursor: 'pointer' }}>← Back</button>
         <span style={{
           fontWeight: 800,
           fontSize: 32,
