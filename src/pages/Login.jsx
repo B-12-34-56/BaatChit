@@ -3,6 +3,8 @@ import { Link, useNavigate } from "react-router-dom";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { auth, db } from "../firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
+import { toast, ToastContainer } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 
 const Login = () => {
   const [err, setErr] = useState(false);
@@ -31,14 +33,15 @@ const Login = () => {
         });
       }
       setLoading(false);
-      navigate("/");
+      toast.success("Login successful! Redirecting...");
+      setTimeout(() => navigate("/"), 1200);
     } catch (err) {
       setErr(true);
-      if (err.code === "auth/wrong-password" || err.code === "auth/user-not-found") {
-        setErrMsg("Invalid email or password");
-      } else {
-        setErrMsg("");
-      }
+      const msg = (err.code === "auth/wrong-password" || err.code === "auth/user-not-found")
+        ? "Invalid email or password"
+        : (err.message || "Something went Wrong!");
+      setErrMsg(msg);
+      toast.error(msg);
       setLoading(false);
     }
   };
@@ -56,13 +59,14 @@ const Login = () => {
       justifyContent: 'center',
       fontFamily: 'Inter, Segoe UI, Arial, sans-serif',
     }}>
+      <ToastContainer position="top-center" autoClose={1100} hideProgressBar={false} newestOnTop closeOnClick pauseOnFocusLoss draggable pauseOnHover />
       <div style={{
         background: 'white',
         borderRadius: 24,
         boxShadow: '0 8px 32px rgba(44, 62, 80, 0.15)',
-        padding: '40px 32px',
-        width: 370,
-        maxWidth: '90vw',
+        padding: '48px 48px',
+        width: 420,
+        maxWidth: '98vw',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',

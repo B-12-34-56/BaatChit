@@ -11,18 +11,20 @@ const Home = () => {
       alignItems: 'center',
       justifyContent: 'center',
       fontFamily: 'Inter, Segoe UI, Arial, sans-serif',
+      padding: '32px 0',
     }}>
       <div style={{
         background: 'white',
         borderRadius: 24,
         boxShadow: '0 8px 32px rgba(44, 62, 80, 0.15)',
-        width: 1100,
+        width: 1400,
         maxWidth: '98vw',
-        minHeight: 600,
+        minHeight: 700,
         minWidth: 340,
         display: 'flex',
         flexDirection: 'row',
         overflow: 'hidden',
+        padding: 0,
       }}>
         <Sidebar />
         <Chat />

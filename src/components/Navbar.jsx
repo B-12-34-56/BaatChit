@@ -16,6 +16,10 @@ const Navbar = () => {
       padding: '0 0 0 0',
       minHeight: 48,
       fontFamily: 'Inter, Segoe UI, Arial, sans-serif',
+      background: 'white',
+      zIndex: 10,
+      position: 'relative',
+      boxShadow: '0 2px 8px rgba(44,62,80,0.06)',
     }}>
       <span style={{
         fontWeight: 800,
@@ -24,29 +28,15 @@ const Navbar = () => {
         WebkitBackgroundClip: 'text',
         WebkitTextFillColor: 'transparent',
         letterSpacing: 0.5,
+        flex: 1,
+        textAlign: 'left',
       }}>Bundi/Kitab</span>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      {/* Optionally, show avatar/displayName in center or remove for minimal look */}
+      {/* <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, justifyContent: 'center' }}>
         <img src={currentUser.photoURL} alt="" style={{ width: 32, height: 32, borderRadius: '50%', objectFit: 'cover', boxShadow: '0 1px 4px rgba(44,62,80,0.10)' }} />
         <span style={{ fontWeight: 600, fontSize: 15, color: '#3a3a5a' }}>{currentUser.displayName}</span>
-        <button onClick={() => navigate('/profile')} style={{ background: 'none', border: 'none', color: '#667eea', fontWeight: 600, fontSize: 15, cursor: 'pointer' }}>Profile</button>
-        <button
-          onClick={() => signOut(auth)}
-          style={{
-            background: 'linear-gradient(90deg, #667eea 0%, #764ba2 100%)',
-            color: 'white',
-            border: 'none',
-            borderRadius: 8,
-            padding: '6px 16px',
-            fontWeight: 700,
-            fontSize: 14,
-            cursor: 'pointer',
-            boxShadow: '0 1px 4px rgba(44,62,80,0.10)',
-            transition: 'background 0.2s',
-          }}
-        >
-          Logout
-        </button>
-      </div>
+      </div> */}
+      <div style={{ flex: 1 }}></div>
     </div>
   )
 }

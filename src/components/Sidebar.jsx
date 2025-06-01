@@ -2,12 +2,12 @@ import React from 'react'
 import Navbar from './Navbar'
 import Search from './Search'
 import Chats from './Chats'
-import AddFriend from './AddFriend'
 import { useContext, useEffect, useState } from 'react'
 import { AuthContext } from '../context/AuthContext'
 import { db } from '../firebase'
 import { doc, getDoc } from 'firebase/firestore'
 import { ChatContext } from '../context/ChatContext'
+import FriendRequestsDropdown from './FriendRequestsDropdown'
 
 const Sidebar = () => {
   const { currentUser } = useContext(AuthContext)
@@ -54,9 +54,11 @@ const Sidebar = () => {
     }}>
       <div style={{ padding: '24px 18px 10px 18px', borderBottom: '1.5px solid #e0e0e0', background: 'rgba(255,255,255,0.95)' }}>
         <Navbar />
+        <div style={{ marginTop: 10, marginBottom: 10 }}>
+          <FriendRequestsDropdown />
+        </div>
       </div>
       <div style={{ padding: '18px 18px 10px 18px', borderBottom: '1.5px solid #e0e0e0', background: 'rgba(255,255,255,0.92)' }}>
-        <AddFriend />
         <div style={{ marginTop: 10 }}>
           <span style={{ fontWeight: 700, fontSize: 15, color: '#667eea' }}>Friends</span>
           {loading && <div style={{ fontSize: 13, color: '#aaa' }}>Loading...</div>}
