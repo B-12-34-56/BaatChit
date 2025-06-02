@@ -1,13 +1,15 @@
 import React, { useContext, useEffect, useState } from 'react';
 import { AuthContext } from '../../context/AuthContext';
+import { ChatContext } from '../../context/ChatContext';
 import { removeFriend } from '../../services/friendService';
 import { toast, ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { db } from '../../utils/firebase';
-import { doc, onSnapshot, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, where, getDocs, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 
 const FriendList = () => {
   const { currentUser } = useContext(AuthContext);
+  const { dispatch } = useContext(ChatContext);
   const [friends, setFriends] = useState([]);
   const [loading, setLoading] = useState(false);
   const [removingId, setRemovingId] = useState('');
@@ -38,11 +40,76 @@ const FriendList = () => {
     return () => unsub();
   }, [currentUser]);
 
+  const handleStartChat = async (friend) => {
+    try {
+      // Create combined ID
+      const combinedId = 
+        currentUser.uid > friend.uid
+          ? currentUser.uid + friend.uid
+          : friend.uid + currentUser.uid;
+
+      // Ensure userChats documents exist for both users
+      const currentUserChatsRef = doc(db, "userChats", currentUser.uid);
+      const friendChatsRef = doc(db, "userChats", friend.uid);
+
+      // Update userChats for current user
+      await setDoc(currentUserChatsRef, {
+        [combinedId]: {
+          userInfo: {
+            uid: friend.uid,
+            displayName: friend.displayName,
+            photoURL: friend.photoURL || null,
+          },
+          date: serverTimestamp(),
+          lastMessage: null
+        }
+      }, { merge: true });
+
+      // Update userChats for friend
+      await setDoc(friendChatsRef, {
+        [combinedId]: {
+          userInfo: {
+            uid: currentUser.uid,
+            displayName: currentUser.displayName,
+            photoURL: currentUser.photoURL || null,
+          },
+          date: serverTimestamp(),
+          lastMessage: null
+        }
+      }, { merge: true });
+
+      // Create conversation document if it doesn't exist
+      const conversationRef = doc(db, "conversations", combinedId);
+      await setDoc(conversationRef, {
+        participants: [currentUser.uid, friend.uid].sort(),
+        createdAt: serverTimestamp(),
+        lastMessage: null,
+        lastMessageTime: null
+      }, { merge: true });
+
+      // Open the chat
+      dispatch({ 
+        type: "CHANGE_USER", 
+        payload: {
+          uid: friend.uid,
+          displayName: friend.displayName,
+          photoURL: friend.photoURL,
+          chatId: combinedId
+        }
+      });
+
+      toast.success('Chat started!');
+    } catch (error) {
+      console.error('Error starting chat:', error);
+      toast.error('Failed to start chat');
+    }
+  };
+
   const handleRemove = async (friendUid) => {
     setRemovingId(friendUid);
     try {
       await removeFriend(currentUser.uid, friendUid);
-      await removeFriend(friendUid, currentUser.uid); // Remove from both sides
+      await removeFriend(friendUid, currentUser.uid);
       toast.info('Friend removed.');
       setFriends(friends.filter(f => f.uid !== friendUid));
     } catch (err) {
@@ -62,15 +129,49 @@ const FriendList = () => {
       ) : (
         friends.map(friend => (
           <div key={friend.uid} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 0', borderBottom: '1px solid #eee' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <img src={friend.photoURL || 'https://ui-avatars.com/api/?name=' + (friend.displayName || 'User')} alt="avatar" style={{ width: 38, height: 38, borderRadius: '50%', objectFit: 'cover', boxShadow: '0 1px 4px rgba(44,62,80,0.10)' }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, cursor: 'pointer' }}
+                 onClick={() => handleStartChat(friend)}>
+              <img src={friend.photoURL || 'https://ui-avatars.com/api/?name=' + (friend.displayName || 'User')} 
+                   alt="avatar" 
+                   style={{ width: 38, height: 38, borderRadius: '50%', objectFit: 'cover', boxShadow: '0 1px 4px rgba(44,62,80,0.10)' }} />
               <div>
                 <div style={{ fontWeight: 600, fontSize: 16 }}>{friend.displayName}</div>
                 <div style={{ fontSize: 13, color: '#888' }}>{friend.email}</div>
-                <div style={{ fontSize: 13, color: friend.isOnline ? '#4CAF50' : '#e53e3e', fontWeight: 600 }}>{friend.isOnline ? 'Online' : 'Offline'}</div>
+                <div style={{ fontSize: 13, color: friend.isOnline ? '#4CAF50' : '#e53e3e', fontWeight: 600 }}>
+                  {friend.isOnline ? 'Online' : 'Offline'}
+                </div>
               </div>
             </div>
-            <button onClick={() => handleRemove(friend.uid)} disabled={removingId === friend.uid} style={{ background: '#e53e3e', color: 'white', border: 'none', borderRadius: 6, padding: '6px 14px', fontWeight: 600, cursor: removingId === friend.uid ? 'not-allowed' : 'pointer', opacity: removingId === friend.uid ? 0.7 : 1 }}>{removingId === friend.uid ? 'Removing...' : 'Remove'}</button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button 
+                onClick={() => handleStartChat(friend)}
+                style={{ 
+                  background: '#667eea', 
+                  color: 'white', 
+                  border: 'none', 
+                  borderRadius: 6, 
+                  padding: '6px 14px', 
+                  fontWeight: 600, 
+                  cursor: 'pointer' 
+                }}>
+                Chat
+              </button>
+              <button 
+                onClick={() => handleRemove(friend.uid)} 
+                disabled={removingId === friend.uid} 
+                style={{ 
+                  background: '#e53e3e', 
+                  color: 'white', 
+                  border: 'none', 
+                  borderRadius: 6, 
+                  padding: '6px 14px', 
+                  fontWeight: 600, 
+                  cursor: removingId === friend.uid ? 'not-allowed' : 'pointer', 
+                  opacity: removingId === friend.uid ? 0.7 : 1 
+                }}>
+                {removingId === friend.uid ? 'Removing...' : 'Remove'}
+              </button>
+            </div>
           </div>
         ))
       )}
@@ -78,4 +179,4 @@ const FriendList = () => {
   );
 };
 
-export default FriendList; 
+export default FriendList;

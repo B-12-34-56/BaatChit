@@ -3,6 +3,7 @@ import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "../utils/firebase";
 import { AuthContext } from "../context/AuthContext";
 import { sendFriendRequest, getOutgoingRequests } from '../services/friendRequestService';
+import { friendRequestService } from '../services/friendRequestService';
 
 const AddFriend = () => {
   const [email, setEmail] = useState("");
@@ -26,7 +27,7 @@ const AddFriend = () => {
         setStatus("You cannot add yourself as a friend.");
         return;
       }
-      await sendFriendRequest(currentUser.uid, friendUid);
+      await friendRequestService.sendFriendRequest(currentUser.uid, friendUid);
       setStatus("Friend request sent!");
       setEmail("");
     } catch (err) {
@@ -37,7 +38,7 @@ const AddFriend = () => {
   React.useEffect(() => {
     async function fetchOutgoing() {
       if (!currentUser?.uid) return;
-      const reqs = await getOutgoingRequests(currentUser.uid);
+      const reqs = await friendRequestService.getOutgoingRequests(currentUser.uid);
       setOutgoing(reqs);
     }
     fetchOutgoing();

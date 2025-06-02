@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useContext } from 'react';
 import { AuthContext } from '../../context/AuthContext';
-import { acceptFriendRequest, rejectFriendRequest } from '../../services/friendRequestService';
+import { friendRequestService, acceptFriendRequest, rejectFriendRequest } from '../../services/friendRequestService';
 import { getUserById } from '../../services/userService';
 import { toast, ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
@@ -33,7 +33,7 @@ const FriendRequests = () => {
   const handleAccept = async (id) => {
     setLoadingId(id);
     try {
-      await acceptFriendRequest(id, currentUser.uid);
+      await friendRequestService.acceptFriendRequest(id, currentUser.uid);
       toast.success('Friend request accepted!');
     } catch (err) {
       toast.error('Error accepting request: ' + err.message);
@@ -43,7 +43,7 @@ const FriendRequests = () => {
   const handleReject = async (id) => {
     setLoadingId(id);
     try {
-      await rejectFriendRequest(id);
+      await friendRequestService.rejectFriendRequest(id, currentUser.uid);
       toast.info('Friend request rejected.');
     } catch (err) {
       toast.error('Error rejecting request: ' + err.message);
