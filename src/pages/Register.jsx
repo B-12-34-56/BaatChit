@@ -1,226 +1,307 @@
-import React, { useState } from 'react';
-import Add from "../img/addAvatar.png";
-import { createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
-import { auth, storage, db } from "../utils/firebase";
-import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
+import React, { useState } from "react";
+import { createUserWithEmailAndPassword, updateProfile, sendEmailVerification } from "firebase/auth";
+import { auth } from "../utils/firebase";
 import { doc, setDoc } from "firebase/firestore";
-import { Link, useNavigate } from 'react-router-dom';
+import { db } from "../utils/firebase";
+import { useNavigate, Link } from "react-router-dom";
 import { toast, ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 
+// Password strength checker
+const checkPasswordStrength = (password) => {
+  let strength = 0;
+  const feedback = [];
+  
+  if (password.length >= 8) strength += 1;
+  else feedback.push("At least 8 characters");
+  
+  if (/[a-z]/.test(password)) strength += 1;
+  else feedback.push("Lowercase letter");
+  
+  if (/[A-Z]/.test(password)) strength += 1;
+  else feedback.push("Uppercase letter");
+  
+  if (/[0-9]/.test(password)) strength += 1;
+  else feedback.push("Number");
+  
+  if (/[^A-Za-z0-9]/.test(password)) strength += 1;
+  else feedback.push("Special character");
+  
+  return { strength, feedback };
+};
+
 const Register = () => {
-  const [err, setErr] = useState(false);
+  const [err, setError] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [errMsg, setErrMsg] = useState("");
-  const [avatarPreview, setAvatarPreview] = useState(null);
+  const [passwordStrength, setPasswordStrength] = useState({ strength: 0, feedback: [] });
+  const [showPassword, setShowPassword] = useState(false);
+  const [formData, setFormData] = useState({
+    displayName: "",
+    email: "",
+    password: "",
+    confirmPassword: ""
+  });
   const navigate = useNavigate();
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+    
+    if (name === "password") {
+      setPasswordStrength(checkPasswordStrength(value));
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setErr(false);
-    setErrMsg("");
     setLoading(true);
+    setError(false);
 
-    const displayName = e.target[0].value;
-    const email = e.target[1].value;
-    const password = e.target[2].value;
-    const file = e.target[3].files[0];
+    const { displayName, email, password, confirmPassword } = formData;
+
+    // Validation
+    if (!displayName || !email || !password) {
+      toast.error("Please fill all fields");
+      setLoading(false);
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      toast.error("Passwords do not match");
+      setLoading(false);
+      return;
+    }
+
+    if (passwordStrength.strength < 3) {
+      toast.error("Password is too weak");
+      setLoading(false);
+      return;
+    }
 
     try {
-      // 1. Create user in Firebase Auth
+      // Create user
       const res = await createUserWithEmailAndPassword(auth, email, password);
-
-      let photoURL = "";
-      if (file) {
-        // 2. Upload avatar if provided
-        const date = new Date().getTime();
-        const storageRef = ref(storage, `${displayName + date}`);
-        await uploadBytesResumable(storageRef, file);
-        photoURL = await getDownloadURL(storageRef);
-      }
-
-      // 3. Update Firebase Auth profile
+      
+      // Update profile
       await updateProfile(res.user, {
         displayName,
-        photoURL,
+        photoURL: `https://ui-avatars.com/api/?name=${displayName}&background=667eea&color=fff&bold=true`
       });
 
-      // 4. Write user profile to Firestore
+      // Send email verification
+      await sendEmailVerification(res.user);
+      toast.success("Verification email sent! Please check your inbox.");
+
+      // Create user document in Firestore
       await setDoc(doc(db, "users", res.user.uid), {
         uid: res.user.uid,
         displayName,
         email,
-        photoURL,
-        password,
-        createdAt: new Date().toISOString(),
+        photoURL: `https://ui-avatars.com/api/?name=${displayName}&background=667eea&color=fff&bold=true`,
+        friends: [],
+        createdAt: new Date(),
+        lastActive: new Date(),
+        isOnline: true,
+        bio: "",
+        emailVerified: false
       });
 
-      // 5. Create empty userChats doc
-      await setDoc(doc(db, "userChats", res.user.uid), { initialized: true });
+      // Create empty user chats document
+      await setDoc(doc(db, "userChats", res.user.uid), {});
 
-      setLoading(false);
-      toast.success("Registration successful! Redirecting...");
-      setTimeout(() => navigate("/"), 1500);
+      // Navigate to email verification page
+      navigate("/verify-email");
     } catch (err) {
-      console.error("Registration error:", err);
-      setErr(true);
+      console.error(err);
       if (err.code === "auth/email-already-in-use") {
-        setErrMsg("This email is already used");
+        toast.error("Email already registered");
+      } else if (err.code === "auth/invalid-email") {
+        toast.error("Invalid email format");
+      } else if (err.code === "auth/weak-password") {
+        toast.error("Password is too weak");
       } else {
-        setErrMsg(err.message || "Something went Wrong!");
+        toast.error("Registration failed. Please try again.");
       }
+      setError(true);
+    } finally {
       setLoading(false);
     }
   };
 
-  const handleAvatarChange = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (ev) => setAvatarPreview(ev.target.result);
-      reader.readAsDataURL(file);
-    } else {
-      setAvatarPreview(null);
-    }
+  const getStrengthColor = () => {
+    const colors = ["#e53e3e", "#f56565", "#f6ad55", "#68d391", "#48bb78"];
+    return colors[passwordStrength.strength] || colors[0];
+  };
+
+  const getStrengthText = () => {
+    const texts = ["Very Weak", "Weak", "Fair", "Good", "Strong"];
+    return texts[passwordStrength.strength] || texts[0];
   };
 
   return (
-    <div style={{
-      minHeight: '100vh',
-      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      fontFamily: 'Inter, Segoe UI, Arial, sans-serif',
-    }}>
-      <ToastContainer position="top-center" autoClose={1400} hideProgressBar={false} newestOnTop closeOnClick pauseOnFocusLoss draggable pauseOnHover />
-      <div style={{
-        background: 'white',
-        borderRadius: 24,
-        boxShadow: '0 8px 32px rgba(44, 62, 80, 0.15)',
-        padding: '48px 48px',
-        width: 420,
-        maxWidth: '98vw',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-      }}>
-        <button onClick={() => navigate('/')} style={{ alignSelf: 'flex-start', marginBottom: 12, background: 'none', border: 'none', color: '#667eea', fontWeight: 600, fontSize: 15, cursor: 'pointer' }}>← Back</button>
-        <span style={{
-          fontWeight: 800,
-          fontSize: 32,
-          background: 'linear-gradient(90deg, #667eea 0%, #764ba2 100%)',
-          WebkitBackgroundClip: 'text',
-          WebkitTextFillColor: 'transparent',
-          marginBottom: 8,
-        }}>Bundi/Kitab</span>
-        <span style={{
-          fontWeight: 600,
-          fontSize: 20,
-          color: '#444',
-          marginBottom: 24,
-        }}>Create your account</span>
-        <form onSubmit={handleSubmit} style={{ width: '100%' }}>
-          <input type="text" placeholder="Display name" required style={inputStyle} />
-          <input type="email" placeholder="Email" required style={inputStyle} />
-          <input type="password" placeholder="Password" required minLength={6} style={inputStyle} />
-          <input style={{ display: "none" }} type="file" id="file" onChange={handleAvatarChange} />
-          <label htmlFor="file" style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            cursor: 'pointer',
-            margin: '18px 0 8px 0',
-          }}>
-            <span style={{ fontWeight: 600, fontSize: 15, marginBottom: 8 }}>Avatar</span>
-            <div style={{
-              width: 120,
-              height: 120,
-              minWidth: 100,
-              minHeight: 100,
-              borderRadius: '50%',
-              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: '0 2px 8px rgba(44, 62, 80, 0.10)',
-              marginBottom: 8,
-              overflow: 'hidden',
-              position: 'relative',
-            }}>
-              <img
-                src={avatarPreview || 'https://ui-avatars.com/api/?name=User&background=667eea&color=fff&size=120'}
-                alt="Avatar preview"
-                style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-              />
-              <img
-                src={Add}
-                alt="Add avatar"
-                style={{
-                  width: 38,
-                  height: 38,
-                  opacity: 0.8,
-                  position: 'absolute',
-                  bottom: 8,
-                  right: 8,
-                  background: 'white',
-                  borderRadius: '50%',
-                  border: '2px solid #fff',
-                  boxShadow: '0 1px 4px rgba(44,62,80,0.10)',
-                  padding: 2,
-                }}
-              />
-            </div>
-            <span style={{ color: '#667eea', fontWeight: 500, fontSize: 15 }}>Change Avatar</span>
-          </label>
-          <button
+    <div className="formContainer">
+      <ToastContainer position="top-center" autoClose={3000} />
+      <div className="formWrapper" style={{ maxWidth: 420, padding: 40 }}>
+        <span className="logo" style={{ fontSize: 28, fontWeight: 700, color: '#667eea' }}>BaatChit</span>
+        <span className="title" style={{ fontSize: 16, color: '#666', marginBottom: 24 }}>Create your account</span>
+        
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <input
+            required
+            type="text"
+            name="displayName"
+            placeholder="Display Name"
+            value={formData.displayName}
+            onChange={handleChange}
             disabled={loading}
             style={{
-              width: '100%',
-              padding: '12px 0',
-              background: loading ? 'linear-gradient(90deg, #b3b3b3 0%, #b3b3b3 100%)' : 'linear-gradient(90deg, #667eea 0%, #764ba2 100%)',
-              color: 'white',
-              fontWeight: 700,
+              padding: '12px 16px',
+              border: '2px solid #e2e8f0',
+              borderRadius: 8,
               fontSize: 16,
+              transition: 'border-color 0.2s',
+              outline: 'none'
+            }}
+            onFocus={(e) => e.target.style.borderColor = '#667eea'}
+            onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
+          />
+          
+          <input
+            required
+            type="email"
+            name="email"
+            placeholder="Email"
+            value={formData.email}
+            onChange={handleChange}
+            disabled={loading}
+            style={{
+              padding: '12px 16px',
+              border: '2px solid #e2e8f0',
+              borderRadius: 8,
+              fontSize: 16,
+              transition: 'border-color 0.2s',
+              outline: 'none'
+            }}
+            onFocus={(e) => e.target.style.borderColor = '#667eea'}
+            onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
+          />
+          
+          <div style={{ position: 'relative' }}>
+            <input
+              required
+              type={showPassword ? "text" : "password"}
+              name="password"
+              placeholder="Password"
+              value={formData.password}
+              onChange={handleChange}
+              disabled={loading}
+              style={{
+                width: '100%',
+                padding: '12px 16px',
+                paddingRight: 48,
+                border: '2px solid #e2e8f0',
+                borderRadius: 8,
+                fontSize: 16,
+                transition: 'border-color 0.2s',
+                outline: 'none'
+              }}
+              onFocus={(e) => e.target.style.borderColor = '#667eea'}
+              onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              style={{
+                position: 'absolute',
+                right: 16,
+                top: '50%',
+                transform: 'translateY(-50%)',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                color: '#718096',
+                fontSize: 14
+              }}
+            >
+              {showPassword ? 'Hide' : 'Show'}
+            </button>
+          </div>
+
+          {formData.password && (
+            <div style={{ marginTop: -8, marginBottom: 8 }}>
+              <div style={{
+                height: 6,
+                background: '#e2e8f0',
+                borderRadius: 3,
+                overflow: 'hidden',
+                marginBottom: 8
+              }}>
+                <div style={{
+                  height: '100%',
+                  width: `${(passwordStrength.strength / 5) * 100}%`,
+                  background: getStrengthColor(),
+                  transition: 'width 0.3s, background 0.3s'
+                }} />
+              </div>
+              <div style={{ fontSize: 13 }}>
+                <span style={{ color: getStrengthColor(), fontWeight: 600 }}>
+                  {getStrengthText()}
+                </span>
+                {passwordStrength.feedback.length > 0 && (
+                  <span style={{ color: '#718096', marginLeft: 8 }}>
+                    Need: {passwordStrength.feedback.join(', ')}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+          
+          <input
+            required
+            type="password"
+            name="confirmPassword"
+            placeholder="Confirm Password"
+            value={formData.confirmPassword}
+            onChange={handleChange}
+            disabled={loading}
+            style={{
+              padding: '12px 16px',
+              border: '2px solid #e2e8f0',
+              borderRadius: 8,
+              fontSize: 16,
+              transition: 'border-color 0.2s',
+              outline: 'none'
+            }}
+            onFocus={(e) => e.target.style.borderColor = '#667eea'}
+            onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
+          />
+          
+          <button
+            type="submit"
+            disabled={loading || passwordStrength.strength < 3}
+            style={{
+              padding: '14px',
+              background: loading || passwordStrength.strength < 3 ? '#cbd5e0' : 'linear-gradient(90deg, #667eea 0%, #764ba2 100%)',
+              color: 'white',
               border: 'none',
               borderRadius: 8,
-              marginTop: 12,
-              marginBottom: 8,
-              boxShadow: '0 2px 8px rgba(44, 62, 80, 0.10)',
-              cursor: loading ? 'not-allowed' : 'pointer',
-              transition: 'background 0.2s',
+              fontSize: 16,
+              fontWeight: 600,
+              cursor: loading || passwordStrength.strength < 3 ? 'not-allowed' : 'pointer',
+              transition: 'all 0.2s',
+              marginTop: 8
             }}
           >
-            {loading ? "Signing up..." : "Sign Up"}
+            {loading ? 'Creating Account...' : 'Sign Up'}
           </button>
-          {err && (
-            <span style={{ color: "#e53e3e", fontSize: "13px", fontWeight: 500, display: 'block', marginTop: 4 }}>
-              {errMsg}
-            </span>
-          )}
         </form>
-        <p style={{ marginTop: 18, color: '#888', fontSize: 15 }}>
-          Already have an account?{' '}
-          <Link to="/login" style={{ color: '#667eea', fontWeight: 600, textDecoration: 'none' }}>Login</Link>
+        
+        <p style={{ marginTop: 24, fontSize: 14, color: '#718096', textAlign: 'center' }}>
+          Already have an account? <Link to="/login" style={{ color: '#667eea', textDecoration: 'none', fontWeight: 600 }}>Login</Link>
         </p>
       </div>
     </div>
   );
-};
-
-const inputStyle = {
-  width: '100%',
-  padding: '12px 14px',
-  margin: '8px 0',
-  border: '1px solid #e0e0e0',
-  borderRadius: 8,
-  fontSize: 15,
-  fontWeight: 500,
-  outline: 'none',
-  background: '#f7f8fa',
-  color: '#222',
-  transition: 'border 0.2s',
-  boxSizing: 'border-box',
 };
 
 export default Register;
