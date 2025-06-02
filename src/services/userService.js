@@ -47,6 +47,13 @@ export async function getUserById(uid) {
   return userSnap.exists() ? userSnap.data() : null;
 }
 
+export async function searchUsersByEmail(email) {
+  const usersRef = collection(db, 'users');
+  const q = query(usersRef, where('email', '==', email.toLowerCase()));
+  const querySnapshot = await getDocs(q);
+  return querySnapshot.docs.map(doc => doc.data());
+}
+
 export async function searchUsers(queryStr) {
   const usersRef = collection(db, 'users');
   const q = query(usersRef, where('displayName', '>=', queryStr), where('displayName', '<=', queryStr + '\uf8ff'));

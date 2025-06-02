@@ -1,68 +1,318 @@
+// friendRequestService.js - Fixed implementation
+import { 
+  collection, 
+  doc, 
+  addDoc, 
+  updateDoc, 
+  query, 
+  where, 
+  getDocs,
+  getDoc,      // FIXED: Added missing import
+  deleteDoc,   // FIXED: Added missing import
+  arrayUnion,
+  serverTimestamp,
+  writeBatch,
+  setDoc       // Added for conversation creation
+} from 'firebase/firestore';
 import { db } from '../utils/firebase';
-import { collection, addDoc, query, where, getDocs, updateDoc, doc, serverTimestamp, deleteDoc, getDoc } from 'firebase/firestore';
 
-export async function sendFriendRequest(fromUid, toUid) {
-  // Prevent sending to self
-  if (fromUid === toUid) throw new Error('Cannot send request to yourself');
-  // Check for existing pending request
-  const q = query(collection(db, 'friendRequests'), where('from', '==', fromUid), where('to', '==', toUid), where('status', '==', 'pending'));
-  const existing = await getDocs(q);
-  if (!existing.empty) throw new Error('Request already sent');
-  return addDoc(collection(db, 'friendRequests'), {
-    from: fromUid,
-    to: toUid,
-    status: 'pending',
-    createdAt: serverTimestamp(),
-  });
-}
+export const friendRequestService = {
+  // Send a friend request
+  async sendFriendRequest(fromUID, toUID) {
+    try {
+      // Check if users are the same
+      if (fromUID === toUID) {
+        throw new Error('Cannot send friend request to yourself');
+      }
 
-export async function acceptFriendRequest(requestId, currentUserUid) {
-  const requestRef = doc(db, 'friendRequests', requestId);
-  await updateDoc(requestRef, { status: 'accepted' });
-  // Add each user to the other's friends array
-  const requestSnap = await getDocs(query(collection(db, 'friendRequests'), where('__name__', '==', requestId)));
-  if (!requestSnap.empty) {
-    const req = requestSnap.docs[0].data();
-    const { from, to } = req;
-    const userDoc = doc(db, 'users', from);
-    const friendDoc = doc(db, 'users', to);
-    await updateDoc(userDoc, { friends: from === currentUserUid ? [to] : [from] });
-    await updateDoc(friendDoc, { friends: to === currentUserUid ? [from] : [to] });
+      // Check if recipient exists
+      const recipientDoc = await getDoc(doc(db, 'users', toUID));
+      if (!recipientDoc.exists()) {
+        throw new Error('User not found');
+      }
+
+      // Check if request already exists
+      const existingQuery = query(
+        collection(db, 'friendRequests'),
+        where('from', '==', fromUID),
+        where('to', '==', toUID)
+      );
+      const existing = await getDocs(existingQuery);
+      
+      if (!existing.empty) {
+        throw new Error('Friend request already sent');
+      }
+
+      // Check reverse request (if they already sent one to us)
+      const reverseQuery = query(
+        collection(db, 'friendRequests'),
+        where('from', '==', toUID),
+        where('to', '==', fromUID),
+        where('status', '==', 'pending')
+      );
+      const reverseExisting = await getDocs(reverseQuery);
+      
+      if (!reverseExisting.empty) {
+        throw new Error('This user has already sent you a friend request');
+      }
+
+      // Check if they're already friends
+      const userDoc = await getDoc(doc(db, 'users', fromUID));
+      const userData = userDoc.data();
+      if (userData?.friends?.includes(toUID)) {
+        throw new Error('Already friends with this user');
+      }
+
+      // Create friend request
+      const requestRef = await addDoc(collection(db, 'friendRequests'), {
+        from: fromUID,
+        to: toUID,
+        status: 'pending',
+        createdAt: serverTimestamp()
+      });
+
+      return { success: true, requestId: requestRef.id };
+    } catch (error) {
+      console.error('Error sending friend request:', error);
+      return { 
+        success: false, 
+        message: error.message || 'Failed to send friend request' 
+      };
+    }
+  },
+
+  // Accept a friend request
+  async acceptFriendRequest(requestId, currentUserUID) {
+    try {
+      const batch = writeBatch(db);
+      
+      // Get the friend request
+      const requestRef = doc(db, 'friendRequests', requestId);
+      const requestSnap = await getDoc(requestRef);
+      
+      if (!requestSnap.exists()) {
+        throw new Error('Friend request not found');
+      }
+
+      const requestData = requestSnap.data();
+      
+      // Verify the current user is the recipient
+      if (requestData.to !== currentUserUID) {
+        throw new Error('Unauthorized to accept this request');
+      }
+
+      // Update friend request status
+      batch.update(requestRef, {
+        status: 'accepted',
+        acceptedAt: serverTimestamp()
+      });
+
+      // Add each user to the other's friends list
+      const senderRef = doc(db, 'users', requestData.from);
+      const recipientRef = doc(db, 'users', requestData.to);
+
+      batch.update(senderRef, {
+        friends: arrayUnion(requestData.to)
+      });
+
+      batch.update(recipientRef, {
+        friends: arrayUnion(requestData.from)
+      });
+
+      // Create a conversation document
+      const conversationId = [requestData.from, requestData.to].sort().join('_');
+      const conversationRef = doc(db, 'conversations', conversationId);
+      
+      // Use setDoc with merge to avoid overwriting if it exists
+      batch.set(conversationRef, {
+        participants: [requestData.from, requestData.to],
+        createdAt: serverTimestamp(),
+        lastMessage: null,
+        lastMessageTime: null
+      }, { merge: true });
+
+      await batch.commit();
+      return { success: true };
+    } catch (error) {
+      console.error('Error accepting friend request:', error);
+      return { 
+        success: false, 
+        message: error.message || 'Failed to accept friend request' 
+      };
+    }
+  },
+
+  // Reject a friend request
+  async rejectFriendRequest(requestId, currentUserUID) {
+    try {
+      const requestRef = doc(db, 'friendRequests', requestId);
+      const requestSnap = await getDoc(requestRef);
+      
+      if (!requestSnap.exists()) {
+        throw new Error('Friend request not found');
+      }
+
+      const requestData = requestSnap.data();
+      
+      // Verify the current user is the recipient
+      if (requestData.to !== currentUserUID) {
+        throw new Error('Unauthorized to reject this request');
+      }
+
+      await updateDoc(requestRef, {
+        status: 'rejected',
+        rejectedAt: serverTimestamp()
+      });
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error rejecting friend request:', error);
+      return { 
+        success: false, 
+        message: error.message || 'Failed to reject friend request' 
+      };
+    }
+  },
+
+  // Get incoming friend requests
+  async getIncomingRequests(userUID) {
+    try {
+      const q = query(
+        collection(db, 'friendRequests'),
+        where('to', '==', userUID),
+        where('status', '==', 'pending')
+      );
+      
+      const snapshot = await getDocs(q);
+      const requests = [];
+      
+      // FIXED: Changed variable name to avoid shadowing
+      for (const docSnap of snapshot.docs) {
+        const data = docSnap.data();
+        // Get sender info
+        const senderDoc = await getDoc(doc(db, 'users', data.from));
+        const senderData = senderDoc.data();
+        
+        requests.push({
+          id: docSnap.id,
+          ...data,
+          senderInfo: {
+            displayName: senderData?.displayName || 'Unknown User',
+            email: senderData?.email || '',
+            photoURL: senderData?.photoURL || null
+          }
+        });
+      }
+      
+      return requests;
+    } catch (error) {
+      console.error('Error getting incoming requests:', error);
+      return [];
+    }
+  },
+
+  // Get outgoing friend requests
+  async getOutgoingRequests(userUID) {
+    try {
+      const q = query(
+        collection(db, 'friendRequests'),
+        where('from', '==', userUID),
+        where('status', '==', 'pending')
+      );
+      
+      const snapshot = await getDocs(q);
+      const requests = [];
+      
+      // FIXED: Changed variable name to avoid shadowing
+      for (const docSnap of snapshot.docs) {
+        const data = docSnap.data();
+        // Get recipient info
+        const recipientDoc = await getDoc(doc(db, 'users', data.to));
+        const recipientData = recipientDoc.data();
+        
+        requests.push({
+          id: docSnap.id,
+          ...data,
+          recipientInfo: {
+            displayName: recipientData?.displayName || 'Unknown User',
+            email: recipientData?.email || '',
+            photoURL: recipientData?.photoURL || null
+          }
+        });
+      }
+      
+      return requests;
+    } catch (error) {
+      console.error('Error getting outgoing requests:', error);
+      return [];
+    }
+  },
+
+  // Cancel an outgoing friend request
+  async cancelFriendRequest(requestId, currentUserUID) {
+    try {
+      const requestRef = doc(db, 'friendRequests', requestId);
+      const requestSnap = await getDoc(requestRef);
+      
+      if (!requestSnap.exists()) {
+        throw new Error('Friend request not found');
+      }
+
+      const requestData = requestSnap.data();
+      
+      // Verify the current user is the sender
+      if (requestData.from !== currentUserUID) {
+        throw new Error('Unauthorized to cancel this request');
+      }
+
+      await deleteDoc(requestRef);
+      return { success: true };
+    } catch (error) {
+      console.error('Error cancelling friend request:', error);
+      return { 
+        success: false, 
+        message: error.message || 'Failed to cancel friend request' 
+      };
+    }
+  },
+
+  // Check if two users are friends
+  async checkFriendship(user1UID, user2UID) {
+    try {
+      const userDoc = await getDoc(doc(db, 'users', user1UID));
+      const userData = userDoc.data();
+      return userData?.friends?.includes(user2UID) || false;
+    } catch (error) {
+      console.error('Error checking friendship:', error);
+      return false;
+    }
+  },
+
+  // Get user's friends list
+  async getFriends(userUID) {
+    try {
+      const userDoc = await getDoc(doc(db, 'users', userUID));
+      const userData = userDoc.data();
+      const friendUIDs = userData?.friends || [];
+      
+      const friends = [];
+      for (const friendUID of friendUIDs) {
+        const friendDoc = await getDoc(doc(db, 'users', friendUID));
+        if (friendDoc.exists()) {
+          const friendData = friendDoc.data();
+          friends.push({
+            uid: friendUID,
+            displayName: friendData.displayName || 'Unknown User',
+            email: friendData.email || '',
+            photoURL: friendData.photoURL || null
+          });
+        }
+      }
+      
+      return friends;
+    } catch (error) {
+      console.error('Error getting friends:', error);
+      return [];
+    }
   }
-}
-
-export async function rejectFriendRequest(requestId) {
-  const requestRef = doc(db, 'friendRequests', requestId);
-  await updateDoc(requestRef, { status: 'rejected' });
-}
-
-export async function cancelFriendRequest(requestId) {
-  await deleteDoc(doc(db, 'friendRequests', requestId));
-}
-
-export async function getIncomingRequests(uid) {
-  const q = query(collection(db, 'friendRequests'), where('to', '==', uid), where('status', '==', 'pending'));
-  const snap = await getDocs(q);
-  return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-}
-
-export async function getOutgoingRequests(uid) {
-  const q = query(collection(db, 'friendRequests'), where('from', '==', uid), where('status', '==', 'pending'));
-  const snap = await getDocs(q);
-  return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-}
-
-export async function getFriendsList(userId) {
-  const userRef = doc(db, 'users', userId);
-  const userSnap = await getDoc(userRef);
-  if (userSnap.exists()) {
-    const friendUids = userSnap.data().friends || [];
-    if (friendUids.length === 0) return [];
-    // Fetch user info for each friend
-    const usersRef = collection(db, 'users');
-    const q = query(usersRef, where('uid', 'in', friendUids));
-    const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map(doc => doc.data());
-  }
-  return [];
-} 
+};
