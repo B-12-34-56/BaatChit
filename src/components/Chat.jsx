@@ -2,8 +2,8 @@ import React, { useContext, useState } from 'react'
 import Cam from "../img/cam.png"
 import Add from "../img/add.png"
 import More from "../img/more.png"
-import Messages from './Messages'
-import Input from './Input'
+import MessageList from './chat/MessageList'
+import MessageInput from './chat/MessageInput'
 import { ChatContext } from '../context/ChatContext'
 import { useNavigate } from 'react-router-dom'
 import { signOut } from 'firebase/auth'
@@ -76,8 +76,8 @@ const Chat = () => {
         )}
       </div>
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
-        <Messages />
-        <Input />
+        <MessageList />
+        <MessageInput />
       </div>
     </div>
   )
