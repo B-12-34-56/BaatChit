@@ -4,7 +4,7 @@
  * @returns {Promise<Object|null>} The tag response object or null if error
  */
 export const getImageTag = async (filename) => {
-  const apiUrl = process.env.REACT_APP_GET_TAG_API_URL;
+  const apiUrl = process.env.GET_TAG_API_URL;
   if (!apiUrl) {
     console.error('Get Tag API URL not set');
     return null;
