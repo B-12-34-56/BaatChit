@@ -3,6 +3,7 @@ import { acceptFriendRequest, rejectFriendRequest } from '../services/friendRequ
 import { AuthContext } from '../context/AuthContext';
 import { db } from '../utils/firebase';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { friendRequestService } from '../services/friendRequestService';
 
 const FriendRequestsDropdown = () => {
   const { currentUser } = useContext(AuthContext);
@@ -20,10 +21,10 @@ const FriendRequestsDropdown = () => {
   }, [currentUser]);
 
   const handleAccept = async (id) => {
-    await acceptFriendRequest(id, currentUser.uid);
+    await friendRequestService.acceptFriendRequest(id, currentUser.uid);
   };
   const handleReject = async (id) => {
-    await rejectFriendRequest(id);
+    await friendRequestService.rejectFriendRequest(id, currentUser.uid);
   };
 
   return (

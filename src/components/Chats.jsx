@@ -24,8 +24,15 @@ const Chats = () => {
     return <div style={{ padding: 24, textAlign: 'center', color: '#667eea', fontWeight: 600 }}>Loading chats...</div>;
   }
 
-  const handleSelect = (u) => {
-    dispatch({ type: "CHANGE_USER", payload: u });
+  const handleSelect = (userInfo, chatId) => {
+    // FIXED: Now passing both userInfo AND chatId
+    dispatch({ 
+      type: "CHANGE_USER", 
+      payload: {
+        ...userInfo,
+        chatId: chatId  // This is critical!
+      }
+    });
   };
 
   return (
@@ -44,7 +51,7 @@ const Chats = () => {
         .map((chat) => (
           <div
             key={chat[0]}
-            onClick={() => handleSelect(chat[1].userInfo)}
+            onClick={() => handleSelect(chat[1].userInfo, chat[0])} // FIXED: Pass chatId (chat[0])
             style={{
               display: 'flex',
               alignItems: 'center',

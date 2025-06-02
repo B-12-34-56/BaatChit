@@ -1,7 +1,7 @@
 import React, { useContext, useState, useEffect, useCallback } from 'react';
 import { AuthContext } from '../../context/AuthContext';
 import { searchUsers } from '../../services/userService';
-import { getFriendsList, getOutgoingRequests, sendFriendRequest } from '../../services/friendRequestService';
+import { getFriendsList, getOutgoingRequests, sendFriendRequest, friendRequestService } from '../../services/friendRequestService';
 import { toast, ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 
@@ -27,8 +27,8 @@ const UserSearch = () => {
     async function fetchStatus() {
       if (!currentUser?.uid) return;
       const [friendsList, outgoingReqs] = await Promise.all([
-        getFriendsList(currentUser.uid),
-        getOutgoingRequests(currentUser.uid)
+        friendRequestService.getFriends(currentUser.uid),
+        friendRequestService.getOutgoingRequests(currentUser.uid)
       ]);
       setFriends(friendsList.map(u => u.uid));
       setOutgoing(outgoingReqs.map(r => r.to));
@@ -64,7 +64,7 @@ const UserSearch = () => {
   const handleAddFriend = async (user) => {
     setActionLoading(user.uid);
     try {
-      await sendFriendRequest(currentUser.uid, user.uid);
+      await friendRequestService.sendFriendRequest(currentUser.uid, user.uid);
       toast.success('Friend request sent!');
       setOutgoing([...outgoing, user.uid]);
     } catch (err) {
