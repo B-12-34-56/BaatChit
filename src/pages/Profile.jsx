@@ -1,7 +1,7 @@
 import React, { useContext, useState, useEffect } from "react";
 import { AuthContext } from "../context/AuthContext";
-import { db, storage } from "../firebase";
-import { doc, getDoc, updateDoc } from "firebase/firestore";
+import { db, storage } from "../utils/firebase";
+import { doc, updateDoc } from "firebase/firestore";
 import { updateProfile } from "firebase/auth";
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import { useNavigate } from "react-router-dom";
@@ -63,7 +63,8 @@ const Profile = () => {
         <span style={{ fontWeight: 800, fontSize: 28, background: 'linear-gradient(90deg, #667eea 0%, #764ba2 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginBottom: 8 }}>Profile</span>
         <form onSubmit={handleSave} style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 12 }}>
-            <img src={photoURL} alt="Avatar" style={{ width: 80, height: 80, borderRadius: '50%', objectFit: 'cover', boxShadow: '0 2px 8px rgba(44,62,80,0.10)', marginBottom: 8 }} />
+            <span style={{ fontWeight: 600, fontSize: 15, marginBottom: 8 }}>Avatar</span>
+            <img src={photoURL} alt="Avatar" style={{ width: 120, height: 120, minWidth: 100, minHeight: 100, borderRadius: '50%', objectFit: 'cover', boxShadow: '0 2px 8px rgba(44,62,80,0.10)', marginBottom: 8 }} />
             <input type="file" accept="image/*" style={{ display: 'none' }} id="avatar-upload" onChange={handleAvatarChange} />
             <label htmlFor="avatar-upload" style={{ color: '#667eea', fontWeight: 500, fontSize: 15, cursor: 'pointer' }}>Change Avatar</label>
           </div>

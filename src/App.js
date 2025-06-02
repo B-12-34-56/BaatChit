@@ -8,6 +8,9 @@ import "./style.scss";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { useContext } from "react";
 import { AuthContext } from "./context/AuthContext";
+import FriendRequests from './components/friends/FriendRequests';
+import UserSearch from './components/friends/UserSearch';
+import FriendList from './components/friends/FriendList';
 
 function App() {
   const {currentUser} = useContext(AuthContext);
@@ -39,6 +42,9 @@ function App() {
             </ProtectedRoute>
           } />
           <Route path="profile" element={<Profile />} />
+          <Route path="friend-requests" element={<ProtectedRoute><FriendRequests /></ProtectedRoute>} />
+          <Route path="user-search" element={<ProtectedRoute><UserSearch /></ProtectedRoute>} />
+          <Route path="friends" element={<ProtectedRoute><FriendList /></ProtectedRoute>} />
         </Route>
       </Routes>
     </BrowserRouter>

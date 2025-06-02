@@ -2,27 +2,27 @@ import { doc, onSnapshot } from "firebase/firestore";
 import React, { useContext, useEffect, useState } from "react";
 import { AuthContext } from "../context/AuthContext";
 import { ChatContext } from "../context/ChatContext";
-import { db } from "../firebase";
+import { db } from "../utils/firebase";
 
 const Chats = () => {
-  const [chats, setChats] = useState([]);
+  const [chats, setChats] = useState({});
 
   const { currentUser } = useContext(AuthContext);
   const { dispatch } = useContext(ChatContext);
 
   useEffect(() => {
-    const getChats = () => {
-      const unsub = onSnapshot(doc(db, "userChats", currentUser.uid), (doc) => {
-        setChats(doc.data());
-      });
+    if (!currentUser?.uid) return;
 
-      return () => {
-        unsub();
-      };
-    };
+    const unsub = onSnapshot(doc(db, "userChats", currentUser.uid), (doc) => {
+      setChats(doc.data() || {});
+    });
 
-    currentUser.uid && getChats();
-  }, [currentUser.uid]);
+    return () => unsub();
+  }, [currentUser?.uid]);
+
+  if (!currentUser?.uid) {
+    return <div style={{ padding: 24, textAlign: 'center', color: '#667eea', fontWeight: 600 }}>Loading chats...</div>;
+  }
 
   const handleSelect = (u) => {
     dispatch({ type: "CHANGE_USER", payload: u });
@@ -39,7 +39,7 @@ const Chats = () => {
       margin: '0 8px',
       minWidth: 0,
     }}>
-      {Object.entries(chats)
+      {Object.entries(chats || {})
         ?.sort((a, b) => b[1].date - a[1].date)
         .map((chat) => (
           <div

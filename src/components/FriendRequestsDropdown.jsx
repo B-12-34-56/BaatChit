@@ -1,27 +1,29 @@
 import React, { useEffect, useState, useContext } from 'react';
-import { getIncomingRequests, acceptRequest, rejectRequest } from '../services/friendRequestService';
+import { acceptFriendRequest, rejectFriendRequest } from '../services/friendRequestService';
 import { AuthContext } from '../context/AuthContext';
+import { db } from '../utils/firebase';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
 
 const FriendRequestsDropdown = () => {
   const { currentUser } = useContext(AuthContext);
   const [requests, setRequests] = useState([]);
   const [open, setOpen] = useState(false);
 
-  const fetchRequests = async () => {
+  useEffect(() => {
     if (!currentUser?.uid) return;
-    const reqs = await getIncomingRequests(currentUser.uid);
-    setRequests(reqs);
-  };
-
-  useEffect(() => { fetchRequests(); }, [currentUser]);
+    const q = query(collection(db, 'friendRequests'), where('to', '==', currentUser.uid), where('status', '==', 'pending'));
+    const unsub = onSnapshot(q, (snapshot) => {
+      const reqs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setRequests(reqs);
+    });
+    return () => unsub();
+  }, [currentUser]);
 
   const handleAccept = async (id) => {
-    await acceptRequest(id, currentUser.uid);
-    fetchRequests();
+    await acceptFriendRequest(id, currentUser.uid);
   };
   const handleReject = async (id) => {
-    await rejectRequest(id);
-    fetchRequests();
+    await rejectFriendRequest(id);
   };
 
   return (
