@@ -264,5 +264,17 @@ export const messageService = {
     }, (error) => {
       console.error('Error in conversation subscription:', error);
     });
+  },
+
+  async getRecentImageMessages(conversationId, limitCount = 20) {
+    const messagesRef = collection(db, 'conversations', conversationId, 'messages');
+    const q = query(
+      messagesRef,
+      where('type', '==', 'image'),
+      orderBy('timestamp', 'desc'),
+      limit(limitCount)
+    );
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => doc.data());
   }
 };

@@ -27,11 +27,17 @@ const AddFriend = () => {
         setStatus("You cannot add yourself as a friend.");
         return;
       }
-      await friendRequestService.sendFriendRequest(currentUser.uid, friendUid);
+      const result = await friendRequestService.sendFriendRequest(currentUser.uid, friendUid);
+      if (!result.success) {
+        console.error('Friend request error:', result);
+        setStatus("Error: " + (result.message || "Failed to send friend request"));
+        return;
+      }
       setStatus("Friend request sent!");
       setEmail("");
     } catch (err) {
-      setStatus("Error: " + err.message);
+      console.error('Friend request error (catch):', err);
+      setStatus("Error: " + (err.message || err.toString()));
     }
   };
 

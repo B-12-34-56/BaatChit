@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { getPresignedUrl } from '../services/presignService';
+import { messageService } from '../services/messageService';
 
 // Use the correct env variable for the frontend (CRA)
 const PRESIGN_API_URL = process.env.REACT_APP_PRESIGN_API_URL;
@@ -14,15 +15,34 @@ function isBlockedFilename(filename) {
   return BLOCKED_KEYWORDS.some(word => lower.includes(word));
 }
 
+async function getFileHash(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  const hashBuffer = await window.crypto.subtle.digest('SHA-256', arrayBuffer);
+  return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 export default function UploadToS3() {
   const [file, setFile] = useState(null);
   const [status, setStatus] = useState({ message: '', type: 'info', visible: false });
   const [uploading, setUploading] = useState(false);
+  const [duplicateWarning, setDuplicateWarning] = useState('');
+  const [chatId, setChatId] = useState('');
 
   // When user selects a file
-  const handleFileChange = (e) => {
-    setFile(e.target.files[0]);
+  const handleFileChange = async (e) => {
+    const selectedFile = e.target.files[0];
+    setFile(selectedFile);
     setStatus({ message: '', type: 'info', visible: false });
+    setDuplicateWarning('');
+    if (!selectedFile || !chatId) return;
+    const hash = await getFileHash(selectedFile);
+    const recentImages = await messageService.getRecentImageMessages(chatId, 20);
+    if (recentImages.some(msg => msg.imageHash === hash)) {
+      setDuplicateWarning('Duplicate image detected!');
+      setFile(null);
+      return;
+    }
+    setDuplicateWarning('');
   };
 
   // Main upload logic
@@ -31,12 +51,20 @@ export default function UploadToS3() {
       setStatus({ message: 'Please select a file first', type: 'error', visible: true });
       return;
     }
+    if (!chatId) {
+      setStatus({ message: 'Please enter a chat ID', type: 'error', visible: true });
+      return;
+    }
     if (isBlockedFilename(file.name)) {
       setStatus({
         message: 'This filename is blocked (contains a forbidden keyword).',
         type: 'error',
         visible: true,
       });
+      return;
+    }
+    if (duplicateWarning) {
+      setStatus({ message: duplicateWarning, type: 'error', visible: true });
       return;
     }
 
@@ -106,6 +134,21 @@ export default function UploadToS3() {
         </h2>
 
         <input
+          type="text"
+          placeholder="Enter chat ID"
+          value={chatId}
+          onChange={e => setChatId(e.target.value)}
+          style={{
+            margin: '8px 0',
+            fontSize: 15,
+            border: '1px solid #e0e0e0',
+            borderRadius: 8,
+            padding: '8px 12px',
+            width: '100%',
+          }}
+        />
+
+        <input
           type="file"
           accept="image/*"
           onChange={handleFileChange}
@@ -126,14 +169,20 @@ export default function UploadToS3() {
           </div>
         )}
 
+        {duplicateWarning && (
+          <div style={{ color: 'red', fontWeight: 600, marginTop: 8 }}>
+            {duplicateWarning}
+          </div>
+        )}
+
         <button
           onClick={handleUpload}
-          disabled={uploading || !file}
+          disabled={uploading || !file || !!duplicateWarning}
           style={{
             width: '100%',
             padding: '12px 0',
             background:
-              uploading || !file
+              uploading || !file || !!duplicateWarning
                 ? 'linear-gradient(90deg, #b3b3b3 0%, #b3b3b3 100%)'
                 : 'linear-gradient(90deg, #667eea 0%, #764ba2 100%)',
             color: 'white',
@@ -144,7 +193,7 @@ export default function UploadToS3() {
             marginTop: 12,
             marginBottom: 8,
             boxShadow: '0 2px 8px rgba(44, 62, 80, 0.10)',
-            cursor: uploading || !file ? 'not-allowed' : 'pointer',
+            cursor: uploading || !file || !!duplicateWarning ? 'not-allowed' : 'pointer',
             transition: 'background 0.2s',
           }}
         >

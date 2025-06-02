@@ -31,4 +31,31 @@ export const getPresignedUrl = async (filename, contentType, apiUrl) => {
     console.error("Error getting presigned URL:", error);
     throw new Error(error instanceof Error ? error.message : "Failed to get presigned URL");
   }
+};
+
+/**
+ * Uploads a file to S3 using a presigned URL
+ * @param {string} presignedUrl - The presigned URL to upload to
+ * @param {File} file - The file to upload
+ * @returns {Promise<string>} The S3 URL (without query params) if successful
+ */
+export const uploadFileToS3 = async (presignedUrl, file) => {
+  try {
+    const response = await fetch(presignedUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': file.type },
+      body: file,
+    });
+    if (!response.ok) {
+      let text = '';
+      try { text = await response.text(); } catch (_) {}
+      throw new Error(`S3 upload failed (status ${response.status}): ${text}`);
+    }
+    // Remove query params to get the S3 object URL
+    const url = presignedUrl.split('?')[0];
+    return url;
+  } catch (err) {
+    console.error('Error uploading file to S3:', err);
+    throw err;
+  }
 }; 
