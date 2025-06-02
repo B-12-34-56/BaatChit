@@ -1,10 +1,11 @@
 import React, { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { signInWithEmailAndPassword, sendPasswordResetEmail, setPersistence, browserLocalPersistence, browserSessionPersistence } from "firebase/auth";
+import { signInWithEmailAndPassword, sendPasswordResetEmail, setPersistence, browserLocalPersistence, browserSessionPersistence, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
 import { auth, db } from "../utils/firebase";
 import { doc, updateDoc } from "firebase/firestore";
 import { toast, ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
+import { useAuthState } from 'react-firebase-hooks/auth';
 
 const Login = () => {
   const [err, setErr] = useState(false);
@@ -18,6 +19,7 @@ const Login = () => {
     password: ""
   });
   const navigate = useNavigate();
+  const [user] = useAuthState(auth);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -96,6 +98,16 @@ const Login = () => {
     }
   };
 
+  const signInWithGoogle = async () => {
+    const provider = new GoogleAuthProvider();
+    await signInWithPopup(auth, provider);
+  };
+
+  if (user) {
+    navigate('/');
+    return null;
+  }
+
   if (showForgotPassword) {
     return (
       <div className="formContainer">
@@ -171,6 +183,24 @@ const Login = () => {
       <div className="formWrapper" style={{ maxWidth: 420, padding: 40 }}>
         <span className="logo" style={{ fontSize: 28, fontWeight: 700, color: '#667eea' }}>BaatChit</span>
         <span className="title" style={{ fontSize: 16, color: '#666', marginBottom: 24 }}>Welcome back</span>
+        
+        <button
+          type="button"
+          onClick={signInWithGoogle}
+          style={{
+            padding: '12px',
+            background: 'linear-gradient(90deg, #4285F4 0%, #34A853 100%)',
+            color: 'white',
+            border: 'none',
+            borderRadius: 8,
+            fontSize: 16,
+            fontWeight: 600,
+            cursor: 'pointer',
+            marginBottom: 16
+          }}
+        >
+          Sign in with Google
+        </button>
         
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <input

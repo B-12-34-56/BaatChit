@@ -7,17 +7,17 @@ import Profile from "./pages/Profile";
 import VerifyEmail from "./pages/VerifyEmail";
 import "./style.scss";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { useContext } from "react";
-import { AuthContext } from "./context/AuthContext";
+import { useAuthState } from 'react-firebase-hooks/auth';
+import { auth } from './utils/firebase';
 import FriendRequests from './components/friends/FriendRequests';
 import UserSearch from './components/friends/UserSearch';
 import FriendList from './components/friends/FriendList';
 
 function App() {
-  const { currentUser } = useContext(AuthContext);
+  const [user, loading] = useAuthState(auth);
 
   const ProtectedRoute = ({ children }) => {
-    if (!currentUser) {
+    if (!user && !loading) {
       return <Navigate to="/login" replace />;
     }
     return children;

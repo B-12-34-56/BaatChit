@@ -1,14 +1,15 @@
 import React, { useState, useContext } from "react";
 import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "../utils/firebase";
-import { AuthContext } from "../context/AuthContext";
+import { useAuthState } from 'react-firebase-hooks/auth';
+import { auth } from '../utils/firebase';
 import { sendFriendRequest, getOutgoingRequests } from '../services/friendRequestService';
 import { friendRequestService } from '../services/friendRequestService';
 
 const AddFriend = () => {
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState("");
-  const { currentUser } = useContext(AuthContext);
+  const [currentUser] = useAuthState(auth);
   const [outgoing, setOutgoing] = useState([]);
 
   const handleAddFriend = async (e) => {

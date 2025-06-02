@@ -1,14 +1,15 @@
 import React, { useContext, useEffect, useState } from 'react';
-import { AuthContext } from '../../context/AuthContext';
+import { useAuthState } from 'react-firebase-hooks/auth';
+import { auth } from '../../utils/firebase';
 // TODO: Adjust the import path if messageService is elsewhere
 import { messageService } from '../../services/messageService';
 
 const ConversationList = ({ onSelect }) => {
-  const { currentUser } = useContext(AuthContext);
+  const [currentUser] = useAuthState(auth);
   const [conversations, setConversations] = useState([]);
 
   useEffect(() => {
-    if (!currentUser?.uid) return;
+    if (!currentUser?.uid || typeof currentUser.uid !== 'string' || !currentUser.uid.trim()) return;
     const unsubscribe = messageService.subscribeToConversations(currentUser.uid, setConversations);
     return () => unsubscribe && unsubscribe();
   }, [currentUser]);

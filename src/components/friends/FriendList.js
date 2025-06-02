@@ -1,21 +1,22 @@
 import React, { useContext, useEffect, useState } from 'react';
-import { AuthContext } from '../../context/AuthContext';
 import { ChatContext } from '../../context/ChatContext';
 import { removeFriend } from '../../services/friendService';
 import { toast, ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { db } from '../../utils/firebase';
 import { doc, onSnapshot, collection, query, where, getDocs, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { useAuthState } from 'react-firebase-hooks/auth';
+import { auth } from '../../utils/firebase';
 
 const FriendList = () => {
-  const { currentUser } = useContext(AuthContext);
   const { dispatch } = useContext(ChatContext);
   const [friends, setFriends] = useState([]);
   const [loading, setLoading] = useState(false);
   const [removingId, setRemovingId] = useState('');
+  const [currentUser] = useAuthState(auth);
 
   useEffect(() => {
-    if (!currentUser?.uid) return;
+    if (!currentUser?.uid || typeof currentUser.uid !== 'string' || !currentUser.uid.trim()) return;
     setLoading(true);
     const userRef = doc(db, 'users', currentUser.uid);
     const unsub = onSnapshot(userRef, async (userSnap) => {
@@ -24,7 +25,9 @@ const FriendList = () => {
         setLoading(false);
         return;
       }
-      const friendUids = userSnap.data().friends || [];
+      let friendUids = userSnap.data().friends || [];
+      // Sanitize: ensure array of non-empty strings, max 10 (Firestore limitation)
+      friendUids = Array.isArray(friendUids) ? friendUids.filter(uid => typeof uid === 'string' && uid.trim()).slice(0, 10) : [];
       if (friendUids.length === 0) {
         setFriends([]);
         setLoading(false);

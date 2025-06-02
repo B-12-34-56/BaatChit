@@ -13,14 +13,17 @@ import {
 } from "firebase/firestore";
 import { db } from "../utils/firebase";
 import { v4 as uuid } from "uuid";
+import { useAuthState } from 'react-firebase-hooks/auth';
+import { auth } from '../utils/firebase';
 
 const Input = () => {
   const [text, setText] = useState("");
   const [img, setImg] = useState(null);
   const [sending, setSending] = useState(false);
 
-  const { currentUser } = useContext(AuthContext);
   const { data } = useContext(ChatContext);
+
+  const [currentUser] = useAuthState(auth);
 
   const handleSend = async () => {
     if (!text.trim() && !img) return;

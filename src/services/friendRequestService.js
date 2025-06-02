@@ -132,7 +132,11 @@ export const friendRequestService = {
       }, { merge: true });
 
       await batch.commit();
-      return { success: true };
+      // Fetch the new friend's user data
+      const friendUid = requestData.from === currentUserUID ? requestData.to : requestData.from;
+      const friendDoc = await getDoc(doc(db, 'users', friendUid));
+      const friendData = friendDoc.exists() ? friendDoc.data() : null;
+      return { success: true, friend: { uid: friendUid, ...friendData } };
     } catch (error) {
       console.error('Error accepting friend request:', error);
       return { 

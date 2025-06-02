@@ -9,7 +9,7 @@ const Messages = () => {
   const [messages, setMessages] = useState([]);
 
   useEffect(() => {
-    if (!data.chatId) return;
+    if (!data.chatId || typeof data.chatId !== 'string' || !data.chatId.trim()) return;
     // Listen to messages in Firestore
     const q = query(
       collection(db, 'conversations', data.chatId, 'messages'),

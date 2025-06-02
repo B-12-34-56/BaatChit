@@ -3,21 +3,22 @@ import Navbar from './Navbar'
 import Search from './Search'
 import Chats from './Chats'
 import { useContext, useEffect, useState } from 'react'
-import { AuthContext } from '../context/AuthContext'
 import { db } from '../utils/firebase'
 import { doc, getDoc } from 'firebase/firestore'
 import { ChatContext } from '../context/ChatContext'
 import FriendRequestsDropdown from './FriendRequestsDropdown'
+import { useAuthState } from 'react-firebase-hooks/auth'
+import { auth } from '../utils/firebase'
 
 const Sidebar = () => {
-  const { currentUser } = useContext(AuthContext)
   const { dispatch } = useContext(ChatContext)
   const [friends, setFriends] = useState([])
   const [loading, setLoading] = useState(false)
+  const [currentUser] = useAuthState(auth)
 
   useEffect(() => {
+    if (!currentUser?.uid) return;
     const fetchFriends = async () => {
-      if (!currentUser?.uid) return
       setLoading(true)
       try {
         const userDoc = await getDoc(doc(db, 'users', currentUser.uid))
@@ -37,6 +38,10 @@ const Sidebar = () => {
     }
     fetchFriends()
   }, [currentUser])
+
+  if (!currentUser?.uid) {
+    return <div style={{padding: 24, color: '#888'}}>Loading user...</div>;
+  }
 
   return (
     <div style={{

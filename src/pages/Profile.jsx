@@ -1,13 +1,14 @@
 import React, { useContext, useState, useEffect } from "react";
-import { AuthContext } from "../context/AuthContext";
 import { db, storage } from "../utils/firebase";
 import { doc, updateDoc } from "firebase/firestore";
 import { updateProfile } from "firebase/auth";
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import { useNavigate } from "react-router-dom";
+import { useAuthState } from 'react-firebase-hooks/auth';
+import { auth } from '../utils/firebase';
 
 const Profile = () => {
-  const { currentUser } = useContext(AuthContext);
+  const [currentUser] = useAuthState(auth);
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [photoURL, setPhotoURL] = useState("");

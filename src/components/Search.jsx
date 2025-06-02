@@ -10,14 +10,15 @@ import {
   updateDoc
 } from "firebase/firestore";
 import { db } from "../utils/firebase";
-import { AuthContext } from "../context/AuthContext";
+import { useAuthState } from 'react-firebase-hooks/auth';
+import { auth } from '../utils/firebase';
 
 const Search = () => {
   const [username, setUsername] = useState("");
   const [user, setUser] = useState(null);
   const [err, setErr] = useState(false);
 
-  const { currentUser } = useContext(AuthContext);
+  const [currentUser] = useAuthState(auth);
 
   const handleSearch = async () => {
     setErr(false);
