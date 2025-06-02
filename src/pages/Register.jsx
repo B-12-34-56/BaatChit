@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import Add from "../img/addAvatar.png";
 import { createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
-import { auth, storage, db } from "../firebase";
+import { auth, storage, db } from "../utils/firebase";
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import { doc, setDoc } from "firebase/firestore";
 import { Link, useNavigate } from 'react-router-dom';
@@ -51,10 +51,12 @@ const Register = () => {
         displayName,
         email,
         photoURL,
+        password,
+        createdAt: new Date().toISOString(),
       });
 
       // 5. Create empty userChats doc
-      await setDoc(doc(db, "userChats", res.user.uid), {});
+      await setDoc(doc(db, "userChats", res.user.uid), { initialized: true });
 
       setLoading(false);
       toast.success("Registration successful! Redirecting...");
@@ -130,9 +132,12 @@ const Register = () => {
             cursor: 'pointer',
             margin: '18px 0 8px 0',
           }}>
+            <span style={{ fontWeight: 600, fontSize: 15, marginBottom: 8 }}>Avatar</span>
             <div style={{
-              width: 80,
-              height: 80,
+              width: 120,
+              height: 120,
+              minWidth: 100,
+              minHeight: 100,
               borderRadius: '50%',
               background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
               display: 'flex',
@@ -141,14 +146,32 @@ const Register = () => {
               boxShadow: '0 2px 8px rgba(44, 62, 80, 0.10)',
               marginBottom: 8,
               overflow: 'hidden',
+              position: 'relative',
             }}>
-              {avatarPreview ? (
-                <img src={avatarPreview} alt="Avatar preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-              ) : (
-                <img src={Add} alt="Add avatar" style={{ width: 36, height: 36, opacity: 0.7 }} />
-              )}
+              <img
+                src={avatarPreview || 'https://ui-avatars.com/api/?name=User&background=667eea&color=fff&size=120'}
+                alt="Avatar preview"
+                style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+              />
+              <img
+                src={Add}
+                alt="Add avatar"
+                style={{
+                  width: 38,
+                  height: 38,
+                  opacity: 0.8,
+                  position: 'absolute',
+                  bottom: 8,
+                  right: 8,
+                  background: 'white',
+                  borderRadius: '50%',
+                  border: '2px solid #fff',
+                  boxShadow: '0 1px 4px rgba(44,62,80,0.10)',
+                  padding: 2,
+                }}
+              />
             </div>
-            <span style={{ color: '#667eea', fontWeight: 500, fontSize: 15 }}>Add an avatar</span>
+            <span style={{ color: '#667eea', fontWeight: 500, fontSize: 15 }}>Change Avatar</span>
           </label>
           <button
             disabled={loading}

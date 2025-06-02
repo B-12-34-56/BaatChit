@@ -1,7 +1,7 @@
-import { db } from '../firebase';
-import { collection, addDoc, query, where, getDocs, updateDoc, doc, serverTimestamp, deleteDoc } from 'firebase/firestore';
+import { db } from '../utils/firebase';
+import { collection, addDoc, query, where, getDocs, updateDoc, doc, serverTimestamp, deleteDoc, getDoc } from 'firebase/firestore';
 
-export async function sendRequest(fromUid, toUid) {
+export async function sendFriendRequest(fromUid, toUid) {
   // Prevent sending to self
   if (fromUid === toUid) throw new Error('Cannot send request to yourself');
   // Check for existing pending request
@@ -16,7 +16,7 @@ export async function sendRequest(fromUid, toUid) {
   });
 }
 
-export async function acceptRequest(requestId, currentUserUid) {
+export async function acceptFriendRequest(requestId, currentUserUid) {
   const requestRef = doc(db, 'friendRequests', requestId);
   await updateDoc(requestRef, { status: 'accepted' });
   // Add each user to the other's friends array
@@ -31,12 +31,12 @@ export async function acceptRequest(requestId, currentUserUid) {
   }
 }
 
-export async function rejectRequest(requestId) {
+export async function rejectFriendRequest(requestId) {
   const requestRef = doc(db, 'friendRequests', requestId);
   await updateDoc(requestRef, { status: 'rejected' });
 }
 
-export async function cancelRequest(requestId) {
+export async function cancelFriendRequest(requestId) {
   await deleteDoc(doc(db, 'friendRequests', requestId));
 }
 
@@ -50,4 +50,19 @@ export async function getOutgoingRequests(uid) {
   const q = query(collection(db, 'friendRequests'), where('from', '==', uid), where('status', '==', 'pending'));
   const snap = await getDocs(q);
   return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+}
+
+export async function getFriendsList(userId) {
+  const userRef = doc(db, 'users', userId);
+  const userSnap = await getDoc(userRef);
+  if (userSnap.exists()) {
+    const friendUids = userSnap.data().friends || [];
+    if (friendUids.length === 0) return [];
+    // Fetch user info for each friend
+    const usersRef = collection(db, 'users');
+    const q = query(usersRef, where('uid', 'in', friendUids));
+    const querySnapshot = await getDocs(q);
+    return querySnapshot.docs.map(doc => doc.data());
+  }
+  return [];
 } 

@@ -7,7 +7,7 @@ import Input from './Input'
 import { ChatContext } from '../context/ChatContext'
 import { useNavigate } from 'react-router-dom'
 import { signOut } from 'firebase/auth'
-import { auth } from '../firebase'
+import { auth } from '../utils/firebase'
 import AddFriend from './AddFriend'
 
 const Chat = () => {

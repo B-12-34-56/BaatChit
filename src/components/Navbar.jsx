@@ -1,13 +1,6 @@
-import { signOut } from 'firebase/auth'
-import React, { useContext } from 'react'
-import { AuthContext } from '../context/AuthContext'
-import { auth } from '../firebase'
-import { useNavigate } from 'react-router-dom'
+import React from 'react'
 
 const Navbar = () => {
-  const {currentUser} = useContext(AuthContext);
-  const navigate = useNavigate();
-
   return (
     <div style={{
       display: 'flex',

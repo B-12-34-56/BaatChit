@@ -1,21 +1,22 @@
-import { doc, onSnapshot } from 'firebase/firestore';
+import { collection, onSnapshot, orderBy, query } from 'firebase/firestore';
 import React, { useContext, useEffect, useState } from 'react'
 import { ChatContext } from '../context/ChatContext';
-import { db } from '../firebase';
+import { db } from '../utils/firebase';
 import Message from './Message'
-import { dbRealtime } from '../firebase';
-import { ref as dbRef, onValue } from 'firebase/database';
 
 const Messages = () => {
   const { data } = useContext(ChatContext);
   const [messages, setMessages] = useState([]);
 
   useEffect(() => {
-    // Listen to messages in Realtime Database
-    const messagesRef = dbRef(dbRealtime, `userChats/${data.chatId}/messages`);
-    const unsub = onValue(messagesRef, (snapshot) => {
-      const msgs = snapshot.val();
-      const msgArr = msgs ? Object.entries(msgs).map(([id, val]) => ({ id, ...val })) : [];
+    if (!data.chatId) return;
+    // Listen to messages in Firestore
+    const q = query(
+      collection(db, 'conversations', data.chatId, 'messages'),
+      orderBy('timestamp', 'asc')
+    );
+    const unsub = onSnapshot(q, (querySnapshot) => {
+      const msgArr = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setMessages(msgArr);
     });
     return () => unsub();
