@@ -6,9 +6,10 @@ import { AuthContext } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { toast, ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
+import { useAuthState } from 'react-firebase-hooks/auth';
 
 const VerifyEmail = () => {
-  const { currentUser } = useContext(AuthContext);
+  const [currentUser] = useAuthState(auth);
   const [resendDisabled, setResendDisabled] = useState(true);
   const [countdown, setCountdown] = useState(60);
   const navigate = useNavigate();

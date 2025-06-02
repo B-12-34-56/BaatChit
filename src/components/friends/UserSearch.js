@@ -1,5 +1,6 @@
 import React, { useContext, useState, useEffect, useCallback } from 'react';
-import { AuthContext } from '../../context/AuthContext';
+import { useAuthState } from 'react-firebase-hooks/auth';
+import { auth } from '../../utils/firebase';
 import { searchUsers } from '../../services/userService';
 import { getFriendsList, getOutgoingRequests, sendFriendRequest, friendRequestService } from '../../services/friendRequestService';
 import { toast, ToastContainer } from 'react-toastify';
@@ -14,7 +15,7 @@ function debounce(fn, delay) {
 }
 
 const UserSearch = () => {
-  const { currentUser } = useContext(AuthContext);
+  const [currentUser] = useAuthState(auth);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);

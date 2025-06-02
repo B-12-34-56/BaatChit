@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { getPresignedUrl } from '../services/presignService';
 import { messageService } from '../services/messageService';
+import { useNavigate } from 'react-router-dom';
 
 // Use the correct env variable for the frontend (CRA)
 const PRESIGN_API_URL = process.env.REACT_APP_PRESIGN_API_URL;
@@ -26,7 +27,7 @@ export default function UploadToS3() {
   const [status, setStatus] = useState({ message: '', type: 'info', visible: false });
   const [uploading, setUploading] = useState(false);
   const [duplicateWarning, setDuplicateWarning] = useState('');
-  const [chatId, setChatId] = useState('');
+  const navigate = useNavigate();
 
   // When user selects a file
   const handleFileChange = async (e) => {
@@ -34,25 +35,13 @@ export default function UploadToS3() {
     setFile(selectedFile);
     setStatus({ message: '', type: 'info', visible: false });
     setDuplicateWarning('');
-    if (!selectedFile || !chatId) return;
-    const hash = await getFileHash(selectedFile);
-    const recentImages = await messageService.getRecentImageMessages(chatId, 20);
-    if (recentImages.some(msg => msg.imageHash === hash)) {
-      setDuplicateWarning('Duplicate image detected!');
-      setFile(null);
-      return;
-    }
-    setDuplicateWarning('');
+    if (!selectedFile) return;
   };
 
   // Main upload logic
   const handleUpload = async () => {
     if (!file) {
       setStatus({ message: 'Please select a file first', type: 'error', visible: true });
-      return;
-    }
-    if (!chatId) {
-      setStatus({ message: 'Please enter a chat ID', type: 'error', visible: true });
       return;
     }
     if (isBlockedFilename(file.name)) {
@@ -120,6 +109,7 @@ export default function UploadToS3() {
           alignItems: 'center',
         }}
       >
+        <button onClick={() => navigate('/')} style={{ alignSelf: 'flex-start', marginBottom: 12, background: 'none', border: 'none', color: '#667eea', fontWeight: 600, fontSize: 15, cursor: 'pointer' }}>← Back</button>
         <h2
           style={{
             fontWeight: 800,
@@ -132,21 +122,6 @@ export default function UploadToS3() {
         >
           Upload Image to S3
         </h2>
-
-        <input
-          type="text"
-          placeholder="Enter chat ID"
-          value={chatId}
-          onChange={e => setChatId(e.target.value)}
-          style={{
-            margin: '8px 0',
-            fontSize: 15,
-            border: '1px solid #e0e0e0',
-            borderRadius: 8,
-            padding: '8px 12px',
-            width: '100%',
-          }}
-        />
 
         <input
           type="file"

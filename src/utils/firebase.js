@@ -18,7 +18,16 @@ const firebaseConfig = {
 
 // Initialize Firebase
 export const app = initializeApp(firebaseConfig);
-export const analytics = getAnalytics(app);
+let analytics;
+if (typeof window !== "undefined" && "measurementId" in firebaseConfig) {
+  try {
+    analytics = getAnalytics(app);
+  } catch (e) {
+    // Optionally log the error
+    console.warn("Analytics not supported in this environment", e);
+  }
+}
+export { analytics };
 export const auth = getAuth();
 export const storage = getStorage();
 export const db = getFirestore();

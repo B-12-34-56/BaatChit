@@ -50,7 +50,7 @@ export const messageService = {
   },
 
   // Send a message
-  async sendMessage(conversationId, message) {
+  async sendMessage(conversationId, message, recipientId) {
     try {
       const batch = writeBatch(db);
       
@@ -61,7 +61,9 @@ export const messageService = {
         senderUID: message.senderUID,
         timestamp: serverTimestamp(),
         read: false,
-        type: message.type || 'text'
+        type: message.type || 'text',
+        imageUrl: message.imageUrl || null,
+        imageHash: message.imageHash || null,
       });
       
       // Update conversation with last message info
@@ -70,7 +72,7 @@ export const messageService = {
       const conversationData = conversationSnap.data();
       
       // Update unread count for the other participant
-      const otherUserId = conversationData.participants.find(id => id !== message.senderUID);
+      const otherUserId = recipientId;
       const currentUnreadCount = conversationData.unreadCount?.[otherUserId] || 0;
       
       batch.update(conversationRef, {
@@ -80,11 +82,50 @@ export const messageService = {
         [`unreadCount.${otherUserId}`]: currentUnreadCount + 1
       });
       
+      // Update userChats for sender
+      const senderUserChatsRef = doc(db, 'userChats', message.senderUID);
+      batch.set(senderUserChatsRef, {
+        [conversationId]: {
+          userInfo: {
+            uid: otherUserId,
+            displayName: message.recipientDisplayName || 'Unknown',
+            photoURL: message.recipientPhotoURL || null,
+          },
+          date: serverTimestamp(),
+          lastMessage: message.text,
+        }
+      }, { merge: true });
+      
+      // Update userChats for recipient
+      const recipientUserChatsRef = doc(db, 'userChats', otherUserId);
+      batch.set(recipientUserChatsRef, {
+        [conversationId]: {
+          userInfo: {
+            uid: message.senderUID,
+            displayName: message.senderDisplayName || 'Unknown',
+            photoURL: message.senderPhotoURL || null,
+          },
+          date: serverTimestamp(),
+          lastMessage: message.text,
+        }
+      }, { merge: true });
+      
       await batch.commit();
+      
+      console.log('Message sent:', {
+        conversationId,
+        sender: message.senderUID,
+        recipient: otherUserId,
+        message: message.text
+      });
       
       return { success: true, messageId: messageRef.id };
     } catch (error) {
-      console.error('Error sending message:', error);
+      console.error('Error sending message:', error, {
+        conversationId,
+        sender: message.senderUID,
+        recipient: recipientId
+      });
       return { success: false, error: error.message };
     }
   },
@@ -157,16 +198,17 @@ export const messageService = {
       
       const snapshot = await getDocs(q);
       const conversations = await Promise.all(
-        snapshot.docs.map(async (doc) => {
-          const data = doc.data();
-          
+        snapshot.docs.map(async (docSnap) => {
+          const data = docSnap.data();
           // Get other participant's info
           const otherUserId = data.participants.find(id => id !== userId);
-          const userDoc = await getDoc(doc(db, 'users', otherUserId));
-          const otherUser = userDoc.data();
-          
+          let otherUser = null;
+          if (typeof otherUserId === 'string') {
+            const userDoc = await getDoc(doc(db, 'users', otherUserId));
+            otherUser = userDoc.data();
+          }
           return {
-            id: doc.id,
+            id: docSnap.id,
             ...data,
             otherUser: {
               uid: otherUserId,
@@ -229,25 +271,30 @@ export const messageService = {
 
   // Subscribe to conversation updates
   subscribeToConversations(userId, callback) {
+    if (!userId || typeof userId !== 'string' || !userId.trim()) {
+      console.warn('subscribeToConversations called with invalid userId:', userId);
+      // Return a no-op unsubscribe function
+      return () => {};
+    }
     const conversationsRef = collection(db, 'conversations');
     const q = query(
       conversationsRef,
       where('participants', 'array-contains', userId),
       orderBy('lastMessageTime', 'desc')
     );
-    
     return onSnapshot(q, async (snapshot) => {
       const conversations = await Promise.all(
-        snapshot.docs.map(async (doc) => {
-          const data = doc.data();
-          
+        snapshot.docs.map(async (docSnap) => {
+          const data = docSnap.data();
           // Get other participant's info
           const otherUserId = data.participants.find(id => id !== userId);
-          const userDoc = await getDoc(doc(db, 'users', otherUserId));
-          const otherUser = userDoc.data();
-          
+          let otherUser = null;
+          if (typeof otherUserId === 'string') {
+            const userDoc = await getDoc(doc(db, 'users', otherUserId));
+            otherUser = userDoc.data();
+          }
           return {
-            id: doc.id,
+            id: docSnap.id,
             ...data,
             otherUser: {
               uid: otherUserId,
@@ -259,22 +306,32 @@ export const messageService = {
           };
         })
       );
-      
       callback(conversations);
     }, (error) => {
       console.error('Error in conversation subscription:', error);
     });
   },
 
-  async getRecentImageMessages(conversationId, limitCount = 20) {
-    const messagesRef = collection(db, 'conversations', conversationId, 'messages');
-    const q = query(
-      messagesRef,
-      where('type', '==', 'image'),
-      orderBy('timestamp', 'desc'),
-      limit(limitCount)
-    );
-    const snapshot = await getDocs(q);
-    return snapshot.docs.map(doc => doc.data());
-  }
+  // async getRecentImageMessages(conversationId, limitCount = 20) {
+  //   if (!conversationId || typeof conversationId !== 'string' || !conversationId.trim()) return [];
+  //   try {
+  //     const messagesRef = collection(db, 'conversations', conversationId, 'messages');
+  //     const q = query(
+  //       messagesRef,
+  //       where('type', '==', 'image'),
+  //       orderBy('timestamp', 'desc'),
+  //       limit(limitCount)
+  //     );
+  //     const snapshot = await getDocs(q);
+  //     return snapshot.docs.map(doc => doc.data());
+  //   } catch (err) {
+  //     // Check for Firestore index error
+  //     if (err && err.code === 'failed-precondition' && err.message && err.message.includes('index')) {
+  //       console.error('Firestore index required: Please create a composite index on "type" (asc) and "timestamp" (desc) for conversations/{conversationId}/messages.');
+  //       return [{ error: 'Firestore index required for this query. Please contact support.' }];
+  //     }
+  //     console.error('Error in getRecentImageMessages:', err);
+  //     return [{ error: err.message || 'Unknown error in getRecentImageMessages' }];
+  //   }
+  // },
 };

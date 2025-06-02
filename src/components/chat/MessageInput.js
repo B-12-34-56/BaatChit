@@ -1,6 +1,7 @@
 import React, { useContext, useState, useRef } from 'react';
 import { ChatContext } from '../../context/ChatContext';
-import { AuthContext } from '../../context/AuthContext';
+import { useAuthState } from 'react-firebase-hooks/auth';
+import { auth } from '../../utils/firebase';
 // TODO: Adjust the import path if messageService is elsewhere
 import { messageService } from '../../services/messageService';
 import { useNavigate } from 'react-router-dom';
@@ -18,7 +19,7 @@ async function getFileHash(file) {
 
 const MessageInput = () => {
   const { data } = useContext(ChatContext);
-  const { currentUser } = useContext(AuthContext);
+  const [currentUser] = useAuthState(auth);
   const [text, setText] = useState('');
   const [imageFile, setImageFile] = useState(null);
   const [duplicateWarning, setDuplicateWarning] = useState('');
@@ -34,11 +35,11 @@ const MessageInput = () => {
     if (imageFile) {
       imageHash = await getFileHash(imageFile);
       // Check for duplicate again before sending (safety)
-      const recentImages = await messageService.getRecentImageMessages(data.chatId, 20);
-      if (recentImages.some(msg => msg.imageHash === imageHash)) {
-        setDuplicateWarning('Duplicate image detected!');
-        return;
-      }
+      // const recentImages = await messageService.getRecentImageMessages(data.chatId, 20);
+      // if (recentImages.some(msg => msg.imageHash === imageHash)) {
+      //   setDuplicateWarning('Duplicate image detected!');
+      //   return;
+      // }
       setDuplicateWarning('');
       setUploading(true);
       try {
@@ -53,14 +54,21 @@ const MessageInput = () => {
       }
       setUploading(false);
     }
-    await messageService.sendMessage(data.chatId, {
-      senderId: currentUser.uid,
-      text,
-      timestamp: Date.now(),
-      type: imageFile ? 'image' : 'text',
-      imageUrl,
-      imageHash,
-    });
+    await messageService.sendMessage(
+      data.chatId,
+      {
+        senderUID: currentUser.uid,
+        senderDisplayName: currentUser.displayName,
+        senderPhotoURL: currentUser.photoURL,
+        recipientDisplayName: data.user?.displayName,
+        recipientPhotoURL: data.user?.photoURL,
+        text,
+        type: imageFile ? 'image' : 'text',
+        imageUrl,
+        imageHash,
+      },
+      data.user?.uid // recipientId
+    );
     setText('');
     setImageFile(null);
   };
@@ -72,14 +80,19 @@ const MessageInput = () => {
   const handleFileChange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    const hash = await getFileHash(file);
-    // Fetch last 20 image messages in this chat
-    const recentImages = await messageService.getRecentImageMessages(data.chatId, 20);
-    if (recentImages.some(msg => msg.imageHash === hash)) {
-      setDuplicateWarning('Duplicate image detected!');
-      setImageFile(null);
+    if (!data.chatId) {
+      setImageFile(file);
+      setDuplicateWarning('');
       return;
     }
+    const hash = await getFileHash(file);
+    // Fetch last 20 image messages in this chat
+    // const recentImages = await messageService.getRecentImageMessages(data.chatId, 20);
+    // if (recentImages.some(msg => msg.imageHash === hash)) {
+    //   setDuplicateWarning('Duplicate image detected!');
+    //   setImg(null);
+    //   return;
+    // }
     setDuplicateWarning('');
     setImageFile(file);
   };
@@ -119,6 +132,11 @@ const MessageInput = () => {
       {duplicateWarning && (
         <div style={{ color: 'red', fontWeight: 600, marginTop: 8 }}>
           {duplicateWarning}
+        </div>
+      )}
+      {imageFile && (
+        <div style={{ margin: '12px 0', color: '#444', fontWeight: 500 }}>
+          {imageFile.name} ({Math.round(imageFile.size / 1024)} KB)
         </div>
       )}
     </form>
