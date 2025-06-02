@@ -1,110 +1,174 @@
+// Input.jsx - Message input component to work with your existing structure
 import React, { useContext, useState } from "react";
-import Attach from "../img/attach.png";
-import ReactLogo from "../img/react-1-logo-black-and-white (1).png";
 import { AuthContext } from "../context/AuthContext";
 import { ChatContext } from "../context/ChatContext";
-import {
-  doc,
-  serverTimestamp,
+import { 
+  arrayUnion, 
+  doc, 
+  serverTimestamp, 
+  Timestamp, 
   updateDoc,
-  getDoc,
   setDoc,
-  collection,
-  addDoc
+  getDoc
 } from "firebase/firestore";
-import { db, storage } from "../utils/firebase";
+import { db } from "../utils/firebase";
 import { v4 as uuid } from "uuid";
-import { getDownloadURL, ref, uploadBytesResumable } from "firebase/storage";
-import { useNavigate } from "react-router-dom";
-
-function generateChatId(uid1, uid2) {
-  return [uid1, uid2].sort().join("");
-}
 
 const Input = () => {
   const [text, setText] = useState("");
   const [img, setImg] = useState(null);
-  const [error, setError] = useState("");
+  const [sending, setSending] = useState(false);
 
   const { currentUser } = useContext(AuthContext);
   const { data } = useContext(ChatContext);
-  const navigate = useNavigate();
 
   const handleSend = async () => {
-    setError("");
-    if (!text && !img) return;
-    const chatId = generateChatId(currentUser.uid, data.user.uid);
-    // Ensure conversation doc exists in Firestore
-    const conversationRef = doc(db, "conversations", chatId);
-    const conversationSnap = await getDoc(conversationRef);
-    if (!conversationSnap.exists()) {
-      await setDoc(conversationRef, {
-        participants: [currentUser.uid, data.user.uid],
-        createdAt: serverTimestamp(),
-      });
-    }
-    let imgUrl = null;
-    if (img) {
-      const storageRef = ref(storage, uuid());
-      await uploadBytesResumable(storageRef, img).then(async (snapshot) => {
-        imgUrl = await getDownloadURL(snapshot.ref);
-        await addDoc(collection(db, "conversations", chatId, "messages"), {
-          senderUid: currentUser.uid,
-          text,
-          img: imgUrl,
-          timestamp: serverTimestamp(),
-        });
-      });
-    } else {
-      await addDoc(collection(db, "conversations", chatId, "messages"), {
-        senderUid: currentUser.uid,
-        text,
+    if (!text.trim() && !img) return;
+    if (!data.chatId || !data.user?.uid) return;
+
+    setSending(true);
+    
+    try {
+      // Create message object
+      const message = {
+        id: uuid(),
+        text: text.trim(),
+        senderId: currentUser.uid,
+        date: Timestamp.now(),
         timestamp: serverTimestamp(),
+      };
+
+      // Handle image upload if needed (you'll need to implement this)
+      if (img) {
+        // Upload image logic here
+        // message.img = downloadURL;
+      }
+
+      // First, ensure the conversation exists
+      const conversationRef = doc(db, "conversations", data.chatId);
+      const conversationSnap = await getDoc(conversationRef);
+      
+      if (!conversationSnap.exists()) {
+        await setDoc(conversationRef, {
+          participants: [currentUser.uid, data.user.uid].sort(),
+          createdAt: serverTimestamp(),
+          lastMessage: text,
+          lastMessageTime: serverTimestamp(),
+          lastMessageSender: currentUser.uid
+        });
+      } else {
+        // Update conversation with last message
+        await updateDoc(conversationRef, {
+          lastMessage: text,
+          lastMessageTime: serverTimestamp(),
+          lastMessageSender: currentUser.uid
+        });
+      }
+
+      // Add message to messages subcollection
+      await setDoc(doc(db, "conversations", data.chatId, "messages", message.id), {
+        text: message.text,
+        senderId: message.senderId,
+        timestamp: serverTimestamp(),
+        read: false
       });
+
+      // Update userChats for both users
+      await updateDoc(doc(db, "userChats", currentUser.uid), {
+        [data.chatId + ".lastMessage"]: {
+          text: text.trim(),
+        },
+        [data.chatId + ".date"]: serverTimestamp(),
+      });
+
+      await updateDoc(doc(db, "userChats", data.user.uid), {
+        [data.chatId + ".lastMessage"]: {
+          text: text.trim(),
+        },
+        [data.chatId + ".date"]: serverTimestamp(),
+      });
+
+      setText("");
+      setImg(null);
+    } catch (err) {
+      console.error("Error sending message:", err);
+      // You might want to show an error toast here
+    } finally {
+      setSending(false);
     }
-    // Optionally update lastMessage and date in userChats for both users
-    await updateDoc(doc(db, "userChats", currentUser.uid), {
-      [chatId + ".lastMessage"]: { text },
-      [chatId + ".date"]: serverTimestamp(),
-    });
-    await updateDoc(doc(db, "userChats", data.user.uid), {
-      [chatId + ".lastMessage"]: { text },
-      [chatId + ".date"]: serverTimestamp(),
-    });
-    setText("");
-    setImg(null);
   };
 
   const handleKey = (e) => {
-    e.code === "Enter" && handleSend();
+    if (e.code === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
   };
-  
+
   return (
-    <div className="input" style={{ display: 'flex', alignItems: 'center', padding: 10, background: 'white', borderRadius: 8, boxShadow: '0 1px 4px rgba(44,62,80,0.06)' }}>
+    <div style={{
+      height: 65,
+      background: '#fff',
+      padding: '10px 20px',
+      display: 'flex',
+      alignItems: 'center',
+      gap: 15,
+      borderTop: '1px solid #e9ecef',
+      boxShadow: '0 -2px 10px rgba(0,0,0,0.05)'
+    }}>
       <input
         type="text"
-        placeholder="Type something..."
-        onKeyDown={handleKey}
+        placeholder="Type a message..."
         onChange={(e) => setText(e.target.value)}
+        onKeyDown={handleKey}
         value={text}
-        style={{ flex: 1, border: 'none', outline: 'none', fontSize: 15, padding: '10px 12px', borderRadius: 6, background: 'transparent', marginRight: 12 }}
+        disabled={sending}
+        style={{
+          flex: 1,
+          border: 'none',
+          outline: 'none',
+          fontSize: 16,
+          padding: '12px 20px',
+          borderRadius: 25,
+          background: '#f1f3f5',
+          fontFamily: 'Inter, -apple-system, sans-serif',
+          transition: 'all 0.2s',
+        }}
+        onFocus={(e) => e.target.style.background = '#e9ecef'}
+        onBlur={(e) => e.target.style.background = '#f1f3f5'}
       />
-      <div className="send" style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-        {/* Paperclip icon triggers file input */}
-        <label htmlFor="file" style={{ cursor: "pointer", display: 'flex', alignItems: 'center', padding: 6, borderRadius: 6, transition: 'background 0.2s' }}>
-          <img src={Attach} alt="Attach" style={{ height: 22, width: 22 }} />
-        </label>
-        <img src={ReactLogo} alt="React Logo" title="Upload" style={{ height: 22, width: 22, cursor: 'pointer', opacity: 1, filter: 'brightness(0.7)', transition: 'filter 0.2s' }} onClick={() => navigate('/upload')} onMouseOver={e => e.currentTarget.style.filter = 'brightness(1)'} onMouseOut={e => e.currentTarget.style.filter = 'brightness(0.7)'} />
-        <input
+      
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        {/* Optional: Add image upload button */}
+        {/* <input
           type="file"
           style={{ display: "none" }}
           id="file"
-          accept="image/*"
           onChange={(e) => setImg(e.target.files[0])}
         />
-        <button onClick={handleSend} style={{ padding: '8px 18px', fontWeight: 600, fontSize: 15, borderRadius: 6, background: 'linear-gradient(90deg, #667eea 0%, #764ba2 100%)', color: 'white', border: 'none', marginLeft: 6, cursor: 'pointer', boxShadow: '0 1px 4px rgba(44,62,80,0.10)' }}>Send</button>
+        <label htmlFor="file">
+          <button style={{...buttonStyle}}>📷</button>
+        </label> */}
+        
+        <button 
+          onClick={handleSend}
+          disabled={!text.trim() || sending}
+          style={{
+            padding: '10px 20px',
+            background: text.trim() && !sending ? 'linear-gradient(90deg, #667eea 0%, #764ba2 100%)' : '#ddd',
+            color: 'white',
+            border: 'none',
+            borderRadius: 25,
+            cursor: text.trim() && !sending ? 'pointer' : 'not-allowed',
+            fontSize: 15,
+            fontWeight: 600,
+            transition: 'all 0.2s',
+            boxShadow: text.trim() && !sending ? '0 2px 10px rgba(102, 126, 234, 0.3)' : 'none',
+          }}
+        >
+          {sending ? '...' : 'Send'}
+        </button>
       </div>
-      {error && <div style={{ color: '#e53e3e', fontSize: 13, marginTop: 4 }}>{error}</div>}
     </div>
   );
 };
