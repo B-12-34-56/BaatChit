@@ -15,6 +15,11 @@ const Message = ({ message }) => {
 
   const isOwner = message.senderUid === currentUser.uid;
 
+  console.log('Rendering message:', message);
+  const avatarUrl = isOwner
+    ? (currentUser.photoURL || 'https://ui-avatars.com/api/?name=You&background=667eea&color=fff&bold=true')
+    : (data.user.photoURL || 'https://ui-avatars.com/api/?name=User&background=667eea&color=fff&bold=true');
+
   return (
     <div
       ref={ref}
@@ -28,8 +33,8 @@ const Message = ({ message }) => {
     >
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: isOwner ? 'flex-end' : 'flex-start' }}>
         <img
-          src={isOwner ? currentUser.photoURL : data.user.photoURL}
-          alt=""
+          src={avatarUrl}
+          alt="avatar"
           style={{
             width: 38,
             height: 38,
@@ -57,7 +62,13 @@ const Message = ({ message }) => {
         alignItems: isOwner ? 'flex-end' : 'flex-start',
       }}>
         <p style={{ margin: 0 }}>{message.text}</p>
-        {message.img && <img src={message.img} alt="" style={{ marginTop: 8, maxWidth: 220, borderRadius: 10, boxShadow: '0 1px 4px rgba(44,62,80,0.10)' }} />}
+        {(message.img || message.imageUrl) && (
+          <img
+            src={message.img || message.imageUrl}
+            alt="message"
+            style={{ marginTop: 8, maxWidth: 220, borderRadius: 10, boxShadow: '0 1px 4px rgba(44,62,80,0.10)' }}
+          />
+        )}
       </div>
     </div>
   );

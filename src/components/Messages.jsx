@@ -22,6 +22,7 @@ const Messages = () => {
       (querySnapshot) => {
         if (!isMounted) return;
         const msgArr = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        console.log('Fetched messages:', msgArr);
         setMessages(msgArr);
       },
       (error) => {
