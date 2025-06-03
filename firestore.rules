@@ -70,55 +70,45 @@ service cloud.firestore {
     //------------------------------------------------------------------------------------------------
 
     match /friendRequests/{requestId} {
-      // 3.1 Read: Only the "from" or "receiverId" user may read a friendRequest doc
-      allow read: if isAuthenticated()
-                  && (
-                       resource.data.from == request.auth.uid
-                       || resource.data.receiverId == request.auth.uid
-                     );
+  // Read: Only the sender or recipient can read
+  allow read: if request.auth != null &&
+    (resource.data.from == request.auth.uid || resource.data.receiverId == request.auth.uid);
 
-      // 3.2 Create: Only an authenticated user may create a new request, with shape:
-      //      { from: string, receiverId: string, status: 'pending', timestamp: serverTimestamp }
-      allow create: if isAuthenticated()
-                    // Must include exactly these keys
-                    && request.resource.data.keys().hasAll(['from', 'receiverId', 'status', 'timestamp'])
-                    && request.resource.data.from == request.auth.uid                  // "from" must be me
-                    && request.resource.data.from != request.resource.data.receiverId  // no self-requests
-                    && request.resource.data.status == 'pending'                        // must start "pending"
-                    && request.resource.data.timestamp is timestamp;                    // allow any Firestore timestamp
+  // Create: Only the sender can create, must be 'pending', no self-requests
+  allow create: if request.auth != null &&
+    request.resource.data.keys().hasOnly(['from', 'receiverId', 'status', 'timestamp', 'createdAt']) &&
+    request.resource.data.from == request.auth.uid &&
+    request.resource.data.from != request.resource.data.receiverId &&
+    request.resource.data.status == 'pending' &&
+    (
+      (request.resource.data.timestamp is timestamp) ||
+      (request.resource.data.createdAt is timestamp)
+    );
 
-      // 3.3 Update: Only the recipient (resource.data.receiverId) may flip status from "pending" → "accepted" or "rejected."
-      //      - Cannot revert to "pending" (resource.data.status must be "pending" now).
-      //      - If new status == "accepted", client must supply { status:'accepted', acceptedAt: serverTimestamp } and no other keys.
-      //      - If new status == "rejected", client must supply { status:'rejected', rejectedAt: serverTimestamp } and no other keys.
-      allow update: if isAuthenticated()
-                    // Only the "receiverId" user can accept/reject
-                    && resource.data.receiverId == request.auth.uid
-                    // Must be "pending" before update
-                    && resource.data.status == 'pending'
-                    && (
-                         // Case A: accepted
-                         (
-                           request.resource.data.status == 'accepted'
-                           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'acceptedAt'])
-                           && request.resource.data.acceptedAt == request.time
-                         )
-                         ||
-                         // Case B: rejected
-                         (
-                           request.resource.data.status == 'rejected'
-                           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'rejectedAt'])
-                           && request.resource.data.rejectedAt == request.time
-                         )
-                       );
+  // Update: Only the recipient can accept/reject, must be 'pending' before, and only allowed fields can change
+  allow update: if request.auth != null &&
+    resource.data.receiverId == request.auth.uid &&
+    resource.data.status == 'pending' &&
+    (
+      // Accept
+      (
+        request.resource.data.status == 'accepted' &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'acceptedAt']) &&
+        request.resource.data.acceptedAt == request.time
+      )
+      ||
+      // Reject
+      (
+        request.resource.data.status == 'rejected' &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'rejectedAt']) &&
+        request.resource.data.rejectedAt == request.time
+      )
+    );
 
-      // 3.4 Delete: Either the sender ("from") or recipient ("receiverId") may delete/cancel a request
-      allow delete: if isAuthenticated()
-                    && (
-                         resource.data.from == request.auth.uid
-                         || resource.data.receiverId == request.auth.uid
-                       );
-    }
+  // Delete: Either sender or recipient can delete/cancel
+  allow delete: if request.auth != null &&
+    (resource.data.from == request.auth.uid || resource.data.receiverId == request.auth.uid);
+}
 
     //------------------------------------------------------------------------------------------------
     // 4. CONVERSATIONS COLLECTION
@@ -185,9 +175,16 @@ service cloud.firestore {
                       && request.resource.data.senderUid == request.auth.uid
                       && request.resource.data.timestamp == request.time
                       && request.resource.data.type in ['text', 'image']
-                      && request.resource.data.text is string
-                      && request.resource.data.text.size() > 0
-                      && request.resource.data.text.size() <= 5000;
+                      && (
+                           (request.resource.data.type == 'text'
+                              && request.resource.data.text is string
+                              && request.resource.data.text.size() > 0
+                              && request.resource.data.text.size() <= 5000)
+                           ||
+                           (request.resource.data.type == 'image'
+                              && request.resource.data.text is string
+                              && request.resource.data.text.size() <= 5000)
+                         );
 
         // 4.7.3 Update: Only the original sender may edit their message. They can change:
         //       text, edited (bool), editedAt (serverTimestamp), deleted (bool), type.
