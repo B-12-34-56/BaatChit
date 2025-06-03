@@ -253,71 +253,83 @@ export const messageService = {
   },
 
   // Subscribe to real-time message updates
-  subscribeToMessages(conversationId, callback) {
+  subscribeToMessages(conversationId, callback, isMountedCheck) {
     const messagesRef = collection(db, 'conversations', conversationId, 'messages');
     const q = query(messagesRef, orderBy('timestamp', 'asc'));
     
-    return onSnapshot(q, (snapshot) => {
-      const messages = [];
-      snapshot.docChanges().forEach((change) => {
-        if (change.type === 'added') {
-          const message = {
-            id: change.doc.id,
-            ...change.doc.data()
-          };
-          messages.push(message);
+    return onSnapshot(q, 
+      (snapshot) => {
+        if (isMountedCheck && !isMountedCheck()) return;
+        
+        const messages = [];
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === 'added') {
+            const message = {
+              id: change.doc.id,
+              ...change.doc.data()
+            };
+            messages.push(message);
+          }
+        });
+        
+        if (messages.length > 0) {
+          callback(messages);
         }
-      });
-      
-      if (messages.length > 0) {
-        callback(messages);
+      }, 
+      (error) => {
+        if (isMountedCheck && !isMountedCheck()) return;
+        console.error('Error in message subscription:', error);
       }
-    }, (error) => {
-      console.error('Error in message subscription:', error);
-    });
+    );
   },
 
   // Subscribe to conversation updates
-  subscribeToConversations(userId, callback) {
+  subscribeToConversations(userId, callback, isMountedCheck) {
     if (!userId || typeof userId !== 'string' || !userId.trim()) {
       console.warn('subscribeToConversations called with invalid userId:', userId);
-      // Return a no-op unsubscribe function
       return () => {};
     }
+    
     const conversationsRef = collection(db, 'conversations');
     const q = query(
       conversationsRef,
       where('participants', 'array-contains', userId),
       orderBy('lastMessageTime', 'desc')
     );
-    return onSnapshot(q, async (snapshot) => {
-      const conversations = await Promise.all(
-        snapshot.docs.map(async (docSnap) => {
-          const data = docSnap.data();
-          // Get other participant's info
-          const otherUserId = data.participants.find(id => id !== userId);
-          let otherUser = null;
-          if (typeof otherUserId === 'string') {
-            const userDoc = await getDoc(doc(db, 'users', otherUserId));
-            otherUser = userDoc.data();
-          }
-          return {
-            id: docSnap.id,
-            ...data,
-            otherUser: {
-              uid: otherUserId,
-              displayName: otherUser?.displayName || 'Unknown User',
-              photoURL: otherUser?.photoURL || null,
-              isOnline: otherUser?.isOnline || false
-            },
-            unreadCount: data.unreadCount?.[userId] || 0
-          };
-        })
-      );
-      callback(conversations);
-    }, (error) => {
-      console.error('Error in conversation subscription:', error);
-    });
+    
+    return onSnapshot(q, 
+      async (snapshot) => {
+        if (isMountedCheck && !isMountedCheck()) return;
+        
+        const conversations = await Promise.all(
+          snapshot.docs.map(async (docSnap) => {
+            const data = docSnap.data();
+            const otherUserId = data.participants.find(id => id !== userId);
+            let otherUser = null;
+            if (typeof otherUserId === 'string') {
+              const userDoc = await getDoc(doc(db, 'users', otherUserId));
+              otherUser = userDoc.data();
+            }
+            return {
+              id: docSnap.id,
+              ...data,
+              otherUser: {
+                uid: otherUserId,
+                displayName: otherUser?.displayName || 'Unknown User',
+                photoURL: otherUser?.photoURL || null,
+                isOnline: otherUser?.isOnline || false
+              },
+              unreadCount: data.unreadCount?.[userId] || 0
+            };
+          })
+        );
+        callback(conversations);
+      }, 
+      (error) => {
+        if (isMountedCheck && !isMountedCheck()) return;
+        console.error('Error in conversation subscription:', error);
+      }
+    );
   },
 
   // async getRecentImageMessages(conversationId, limitCount = 20) {

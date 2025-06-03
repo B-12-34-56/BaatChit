@@ -17,19 +17,34 @@ const FriendRequests = () => {
 
   useEffect(() => {
     if (!currentUser?.uid || typeof currentUser.uid !== 'string' || !currentUser.uid.trim()) return;
+    
+    let isMounted = true;
     setLoading(true);
+    
     const q = query(collection(db, 'friendRequests'), where('to', '==', currentUser.uid), where('status', '==', 'pending'));
-    const unsub = onSnapshot(q, async (snapshot) => {
-      const reqs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      // Fetch user info for each request
-      const withUserInfo = await Promise.all(reqs.map(async req => {
-        const user = await getUserById(req.from);
-        return { ...req, fromUser: user };
-      }));
-      setRequests(withUserInfo);
-      setLoading(false);
-    });
-    return () => unsub();
+    const unsub = onSnapshot(q, 
+      async (snapshot) => {
+        if (!isMounted) return;
+        
+        const reqs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const withUserInfo = await Promise.all(reqs.map(async req => {
+          const user = await getUserById(req.from);
+          return { ...req, fromUser: user };
+        }));
+        setRequests(withUserInfo);
+        setLoading(false);
+      },
+      (error) => {
+        if (!isMounted) return;
+        console.error('FriendRequests listener error:', error);
+        setLoading(false);
+      }
+    );
+    
+    return () => {
+      isMounted = false;
+      unsub();
+    };
   }, [currentUser]);
 
   const handleAccept = async (id) => {

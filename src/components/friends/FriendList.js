@@ -17,30 +17,47 @@ const FriendList = () => {
 
   useEffect(() => {
     if (!currentUser?.uid || typeof currentUser.uid !== 'string' || !currentUser.uid.trim()) return;
+    
+    let isMounted = true;
     setLoading(true);
+    
     const userRef = doc(db, 'users', currentUser.uid);
-    const unsub = onSnapshot(userRef, async (userSnap) => {
-      if (!userSnap.exists()) {
-        setFriends([]);
+    const unsub = onSnapshot(userRef, 
+      async (userSnap) => {
+        if (!isMounted) return;
+        
+        if (!userSnap.exists()) {
+          setFriends([]);
+          setLoading(false);
+          return;
+        }
+        
+        let friendUids = userSnap.data().friends || [];
+        friendUids = Array.isArray(friendUids) ? friendUids.filter(uid => typeof uid === 'string' && uid.trim()).slice(0, 10) : [];
+        
+        if (friendUids.length === 0) {
+          setFriends([]);
+          setLoading(false);
+          return;
+        }
+        
+        const usersRef = collection(db, 'users');
+        const q = query(usersRef, where('uid', 'in', friendUids));
+        const querySnapshot = await getDocs(q);
+        setFriends(querySnapshot.docs.map(doc => doc.data()));
         setLoading(false);
-        return;
-      }
-      let friendUids = userSnap.data().friends || [];
-      // Sanitize: ensure array of non-empty strings, max 10 (Firestore limitation)
-      friendUids = Array.isArray(friendUids) ? friendUids.filter(uid => typeof uid === 'string' && uid.trim()).slice(0, 10) : [];
-      if (friendUids.length === 0) {
-        setFriends([]);
+      },
+      (error) => {
+        if (!isMounted) return;
+        console.error('FriendList listener error:', error);
         setLoading(false);
-        return;
       }
-      // Fetch user info for each friend
-      const usersRef = collection(db, 'users');
-      const q = query(usersRef, where('uid', 'in', friendUids));
-      const querySnapshot = await getDocs(q);
-      setFriends(querySnapshot.docs.map(doc => doc.data()));
-      setLoading(false);
-    });
-    return () => unsub();
+    );
+    
+    return () => {
+      isMounted = false;
+      unsub();
+    };
   }, [currentUser]);
 
   const handleStartChat = async (friend) => {

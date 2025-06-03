@@ -10,16 +10,30 @@ const Messages = () => {
 
   useEffect(() => {
     if (!data.chatId || typeof data.chatId !== 'string' || !data.chatId.trim()) return;
-    // Listen to messages in Firestore
+    
+    let isMounted = true;
+    
     const q = query(
       collection(db, 'conversations', data.chatId, 'messages'),
       orderBy('timestamp', 'asc')
     );
-    const unsub = onSnapshot(q, (querySnapshot) => {
-      const msgArr = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setMessages(msgArr);
-    });
-    return () => unsub();
+    
+    const unsub = onSnapshot(q, 
+      (querySnapshot) => {
+        if (!isMounted) return;
+        const msgArr = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setMessages(msgArr);
+      },
+      (error) => {
+        if (!isMounted) return;
+        console.error('Message listener error:', error);
+      }
+    );
+    
+    return () => {
+      isMounted = false;
+      unsub();
+    };
   }, [data.chatId]);
 
   return (

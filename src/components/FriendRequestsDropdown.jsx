@@ -17,16 +17,31 @@ const FriendRequestsDropdown = () => {
 
   useEffect(() => {
     if (!currentUser?.uid) return;
+    
+    let isMounted = true;
+    
     const q = query(collection(db, 'friendRequests'), where('to', '==', currentUser.uid), where('status', '==', 'pending'));
-    const unsub = onSnapshot(q, async (snapshot) => {
-      const reqs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      const withUserInfo = await Promise.all(reqs.map(async req => {
-        const user = await getUserById(req.from);
-        return { ...req, fromUser: user };
-      }));
-      setRequests(withUserInfo);
-    });
-    return () => unsub();
+    const unsub = onSnapshot(q, 
+      async (snapshot) => {
+        if (!isMounted) return;
+        
+        const reqs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const withUserInfo = await Promise.all(reqs.map(async req => {
+          const user = await getUserById(req.from);
+          return { ...req, fromUser: user };
+        }));
+        setRequests(withUserInfo);
+      },
+      (error) => {
+        if (!isMounted) return;
+        console.error('FriendRequestsDropdown listener error:', error);
+      }
+    );
+    
+    return () => {
+      isMounted = false;
+      unsub();
+    };
   }, [currentUser]);
 
   const handleAccept = async (id) => {
