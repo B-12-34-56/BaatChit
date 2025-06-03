@@ -1,20 +1,39 @@
-import React, { useContext, useRef, useEffect } from 'react';
+import React, { useContext, useRef, useEffect, useState } from 'react';
 import { ChatContext } from '../../context/ChatContext';
 import { db } from '../../utils/firebase';
-import { collection, query, orderBy } from 'firebase/firestore';
-import { useCollectionData } from 'react-firebase-hooks/firestore';
+import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
 import Message from '../Message';
 import { VariableSizeList } from 'react-window';
 
 const MessageList = () => {
   const { data } = useContext(ChatContext);
   const dummy = useRef();
+  const [messages, setMessages] = useState([]);
 
-  const messagesRef = data.chatId
-    ? collection(db, 'conversations', data.chatId, 'messages')
-    : null;
-  const q = data.chatId ? query(messagesRef, orderBy('timestamp', 'asc')) : null;
-  const [messages] = useCollectionData(q, { idField: 'id' });
+  useEffect(() => {
+    if (!data.chatId) return;
+
+    let isMounted = true;
+    const messagesRef = collection(db, 'conversations', data.chatId, 'messages');
+    const q = query(messagesRef, orderBy('timestamp', 'asc'));
+    
+    const unsub = onSnapshot(q, 
+      (snapshot) => {
+        if (!isMounted) return;
+        const newMessages = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setMessages(newMessages);
+      },
+      (error) => {
+        if (!isMounted) return;
+        console.error('MessageList listener error:', error);
+      }
+    );
+
+    return () => {
+      isMounted = false;
+      unsub();
+    };
+  }, [data.chatId]);
 
   useEffect(() => {
     if (dummy.current) {
