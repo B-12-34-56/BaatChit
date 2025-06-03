@@ -10,8 +10,19 @@ const ConversationList = ({ onSelect }) => {
 
   useEffect(() => {
     if (!currentUser?.uid || typeof currentUser.uid !== 'string' || !currentUser.uid.trim()) return;
-    const unsubscribe = messageService.subscribeToConversations(currentUser.uid, setConversations);
-    return () => unsubscribe && unsubscribe();
+    
+    let isMounted = true;
+    
+    const unsubscribe = messageService.subscribeToConversations(
+      currentUser.uid, 
+      setConversations,
+      () => isMounted
+    );
+    
+    return () => {
+      isMounted = false;
+      unsubscribe && unsubscribe();
+    };
   }, [currentUser]);
 
   return (
