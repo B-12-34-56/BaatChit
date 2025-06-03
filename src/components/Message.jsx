@@ -62,9 +62,9 @@ const Message = ({ message }) => {
         alignItems: isOwner ? 'flex-end' : 'flex-start',
       }}>
         <p style={{ margin: 0 }}>{message.text}</p>
-        {(message.img || message.imageUrl) && (
+        {message.imageUrl && (
           <img
-            src={message.img || message.imageUrl}
+            src={message.imageUrl}
             alt="message"
             style={{ marginTop: 8, maxWidth: 220, borderRadius: 10, boxShadow: '0 1px 4px rgba(44,62,80,0.10)' }}
           />

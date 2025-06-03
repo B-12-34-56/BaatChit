@@ -44,3 +44,5 @@ yarn-error.log*
 # jest
 /jest.config.js
 /coverage/
+
+serviceAccountKey.json
