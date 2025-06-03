@@ -13,7 +13,7 @@ const Message = ({ message }) => {
     ref.current?.scrollIntoView({ behavior: "smooth" });
   }, [message]);
 
-  const isOwner = message.senderId === currentUser.uid;
+  const isOwner = message.senderUid === currentUser.uid;
 
   return (
     <div

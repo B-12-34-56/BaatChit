@@ -1,27 +1,55 @@
-import React, { useContext, useState, useEffect, useCallback } from 'react';
+import React, { useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth } from '../../utils/firebase';
 import { searchUsers } from '../../services/userService';
 import { getFriendsList, getOutgoingRequests, sendFriendRequest, friendRequestService } from '../../services/friendRequestService';
 import { toast, ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
+import { messageService } from '../../services/messageService';
+import { ChatContext } from '../../context/ChatContext';
 
-function debounce(fn, delay) {
-  let timer;
-  return (...args) => {
-    clearTimeout(timer);
-    timer = setTimeout(() => fn(...args), delay);
-  };
+// Debounced search with abort
+function useDebouncedSearch(searchTerm, delay = 300) {
+  const [results, setResults] = useState([]);
+  const abortControllerRef = useRef();
+
+  useEffect(() => {
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = new AbortController();
+
+    const timer = setTimeout(async () => {
+      if (searchTerm) {
+        try {
+          const users = await searchUsers(searchTerm, {
+            signal: abortControllerRef.current.signal
+          });
+          setResults(users);
+        } catch (err) {
+          if (err.name !== 'AbortError') throw err;
+        }
+      } else {
+        setResults([]);
+      }
+    }, delay);
+
+    return () => {
+      clearTimeout(timer);
+      abortControllerRef.current?.abort();
+    };
+  }, [searchTerm, delay]);
+
+  return results;
 }
 
 const UserSearch = () => {
   const [currentUser] = useAuthState(auth);
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [friends, setFriends] = useState([]);
   const [outgoing, setOutgoing] = useState([]);
   const [actionLoading, setActionLoading] = useState('');
+  const { dispatch } = useContext(ChatContext);
+  const [chatLoading, setChatLoading] = useState('');
 
   // Fetch friends and outgoing requests for status
   useEffect(() => {
@@ -37,24 +65,12 @@ const UserSearch = () => {
     fetchStatus();
   }, [currentUser]);
 
-  // Debounced search
-  const doSearch = useCallback(debounce(async (q) => {
-    if (!q) return setResults([]);
-    setLoading(true);
-    try {
-      const users = await searchUsers(q);
-      // Exclude self
-      setResults(users.filter(u => u.uid !== currentUser.uid));
-    } catch (err) {
-      setResults([]);
-    }
-    setLoading(false);
-  }, 400), [currentUser]);
+  // Use debounced search with abort
+  const results = useDebouncedSearch(query, 400);
 
   useEffect(() => {
-    doSearch(query);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query]);
+    setLoading(!!query && results.length === 0);
+  }, [query, results]);
 
   const getStatus = (user) => {
     if (friends.includes(user.uid)) return 'friend';
@@ -72,6 +88,41 @@ const UserSearch = () => {
       toast.error('Error: ' + err.message);
     }
     setActionLoading('');
+  };
+
+  const handleStartChat = async (user) => {
+    setChatLoading(user.uid);
+    try {
+      // 1. Create/get conversation
+      const conversationId = await messageService.createConversation(currentUser.uid, user.uid);
+      // 2. Send a default first message (optional, or you can prompt for input)
+      const firstMessage = {
+        senderUid: currentUser.uid,
+        senderDisplayName: currentUser.displayName,
+        senderPhotoURL: currentUser.photoURL,
+        recipientDisplayName: user.displayName,
+        recipientPhotoURL: user.photoURL,
+        text: 'Hi!',
+        type: 'text',
+        createdAt: new Date(), // fallback, will be overwritten by serverTimestamp in service
+      };
+      await messageService.sendMessage(conversationId, firstMessage, user.uid);
+      // 3. Update chat context to open the chat
+      dispatch({
+        type: 'CHANGE_USER',
+        payload: {
+          uid: user.uid,
+          displayName: user.displayName,
+          photoURL: user.photoURL,
+          chatId: conversationId
+        }
+      });
+      toast.success('Chat started!');
+    } catch (err) {
+      console.error('Error starting chat:', err);
+      toast.error('Failed to start chat: ' + (err.message || 'Unknown error'));
+    }
+    setChatLoading('');
   };
 
   return (
@@ -107,7 +158,10 @@ const UserSearch = () => {
                 ) : status === 'pending' ? (
                   <span style={{ color: '#888', fontWeight: 600 }}>Pending</span>
                 ) : (
-                  <button onClick={() => handleAddFriend(user)} disabled={actionLoading === user.uid} style={{ background: '#667eea', color: 'white', border: 'none', borderRadius: 6, padding: '6px 14px', fontWeight: 600, cursor: actionLoading === user.uid ? 'not-allowed' : 'pointer', opacity: actionLoading === user.uid ? 0.7 : 1 }}>{actionLoading === user.uid ? 'Sending...' : 'Add Friend'}</button>
+                  <>
+                    <button onClick={() => handleAddFriend(user)} disabled={actionLoading === user.uid} style={{ background: '#667eea', color: 'white', border: 'none', borderRadius: 6, padding: '6px 14px', fontWeight: 600, cursor: actionLoading === user.uid ? 'not-allowed' : 'pointer', opacity: actionLoading === user.uid ? 0.7 : 1, marginRight: 8 }}>{actionLoading === user.uid ? 'Sending...' : 'Add Friend'}</button>
+                    <button onClick={() => handleStartChat(user)} disabled={chatLoading === user.uid} style={{ background: '#4CAF50', color: 'white', border: 'none', borderRadius: 6, padding: '6px 14px', fontWeight: 600, cursor: chatLoading === user.uid ? 'not-allowed' : 'pointer', opacity: chatLoading === user.uid ? 0.7 : 1 }}>{chatLoading === user.uid ? 'Starting...' : 'Start Chat'}</button>
+                  </>
                 )}
               </div>
             </div>
