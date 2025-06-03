@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { friendRequestService, acceptFriendRequest, rejectFriendRequest } from '../../services/friendRequestService';
+import { friendRequestService } from '../../services/friendRequestService';
 import { getUserById } from '../../services/userService';
 import { toast, ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
@@ -21,7 +21,13 @@ const FriendRequests = () => {
     let isMounted = true;
     setLoading(true);
     
-    const q = query(collection(db, 'friendRequests'), where('to', '==', currentUser.uid), where('status', '==', 'pending'));
+    // FIXED: Changed 'to' to 'receiverId' to match the service and rules
+    const q = query(
+      collection(db, 'friendRequests'), 
+      where('receiverId', '==', currentUser.uid), 
+      where('status', '==', 'pending')
+    );
+    
     const unsub = onSnapshot(q, 
       async (snapshot) => {
         if (!isMounted) return;
@@ -37,6 +43,7 @@ const FriendRequests = () => {
       (error) => {
         if (!isMounted) return;
         console.error('FriendRequests listener error:', error);
+        toast.error('Error loading friend requests');
         setLoading(false);
       }
     );
@@ -58,17 +65,30 @@ const FriendRequests = () => {
       }
       setAcceptedId(id);
       toast.success('Friend request accepted!');
+      
+      // Remove the request from local state immediately
+      setRequests(prevRequests => prevRequests.filter(req => req.id !== id));
+      
       setTimeout(() => setAcceptedId(null), 1200);
     } catch (err) {
       toast.error('Error accepting request: ' + err.message);
     }
     setLoadingId(null);
   };
+  
   const handleReject = async (id) => {
     setLoadingId(id);
     try {
-      await friendRequestService.rejectFriendRequest(id, currentUser.uid);
+      const result = await friendRequestService.rejectFriendRequest(id, currentUser.uid);
+      if (!result.success) {
+        toast.error('Error: ' + (result.message || 'Failed to reject request'));
+        setLoadingId(null);
+        return;
+      }
       toast.info('Friend request rejected.');
+      
+      // Remove the request from local state immediately
+      setRequests(prevRequests => prevRequests.filter(req => req.id !== id));
     } catch (err) {
       toast.error('Error rejecting request: ' + err.message);
     }
@@ -95,7 +115,17 @@ const FriendRequests = () => {
             transition: 'opacity 0.5s',
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <img src={req.fromUser?.photoURL || 'https://ui-avatars.com/api/?name=' + (req.fromUser?.displayName || 'User')} alt="avatar" style={{ width: 38, height: 38, borderRadius: '50%', objectFit: 'cover', boxShadow: '0 1px 4px rgba(44,62,80,0.10)' }} />
+              <img 
+                src={req.fromUser?.photoURL || 'https://ui-avatars.com/api/?name=' + (req.fromUser?.displayName || 'User')} 
+                alt="avatar" 
+                style={{ 
+                  width: 38, 
+                  height: 38, 
+                  borderRadius: '50%', 
+                  objectFit: 'cover', 
+                  boxShadow: '0 1px 4px rgba(44,62,80,0.10)' 
+                }} 
+              />
               <div>
                 <div style={{ fontWeight: 600, fontSize: 16 }}>{req.fromUser?.displayName || req.from}</div>
                 <div style={{ fontSize: 13, color: '#888' }}>{req.fromUser?.email}</div>
@@ -104,13 +134,45 @@ const FriendRequests = () => {
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               {acceptedId === req.id ? (
                 <span style={{ color: '#4CAF50', fontWeight: 700, fontSize: 15, display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="10" fill="#4CAF50"/><path d="M6 10.5L9 13.5L14 8.5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="10" cy="10" r="10" fill="#4CAF50"/>
+                    <path d="M6 10.5L9 13.5L14 8.5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
                   Accepted!
                 </span>
               ) : (
                 <>
-                  <button onClick={() => handleAccept(req.id)} disabled={loadingId === req.id} style={{ marginRight: 8, background: '#4CAF50', color: 'white', border: 'none', borderRadius: 6, padding: '6px 14px', fontWeight: 600, cursor: loadingId === req.id ? 'not-allowed' : 'pointer', opacity: loadingId === req.id ? 0.7 : 1 }}>{loadingId === req.id ? 'Accepting...' : 'Accept'}</button>
-                  <button onClick={() => handleReject(req.id)} disabled={loadingId === req.id} style={{ background: '#e53e3e', color: 'white', border: 'none', borderRadius: 6, padding: '6px 14px', fontWeight: 600, cursor: loadingId === req.id ? 'not-allowed' : 'pointer', opacity: loadingId === req.id ? 0.7 : 1 }}>{loadingId === req.id ? 'Rejecting...' : 'Reject'}</button>
+                  <button 
+                    onClick={() => handleAccept(req.id)} 
+                    disabled={loadingId === req.id} 
+                    style={{ 
+                      marginRight: 8, 
+                      background: '#4CAF50', 
+                      color: 'white', 
+                      border: 'none', 
+                      borderRadius: 6, 
+                      padding: '6px 14px', 
+                      fontWeight: 600, 
+                      cursor: loadingId === req.id ? 'not-allowed' : 'pointer', 
+                      opacity: loadingId === req.id ? 0.7 : 1 
+                    }}>
+                    {loadingId === req.id ? 'Accepting...' : 'Accept'}
+                  </button>
+                  <button 
+                    onClick={() => handleReject(req.id)} 
+                    disabled={loadingId === req.id} 
+                    style={{ 
+                      background: '#e53e3e', 
+                      color: 'white', 
+                      border: 'none', 
+                      borderRadius: 6, 
+                      padding: '6px 14px', 
+                      fontWeight: 600, 
+                      cursor: loadingId === req.id ? 'not-allowed' : 'pointer', 
+                      opacity: loadingId === req.id ? 0.7 : 1 
+                    }}>
+                    {loadingId === req.id ? 'Rejecting...' : 'Reject'}
+                  </button>
                 </>
               )}
             </div>
@@ -121,4 +183,4 @@ const FriendRequests = () => {
   );
 };
 
-export default FriendRequests; 
+export default FriendRequests;

@@ -20,7 +20,7 @@ const FriendRequestsDropdown = () => {
     
     let isMounted = true;
     
-    const q = query(collection(db, 'friendRequests'), where('to', '==', currentUser.uid), where('status', '==', 'pending'));
+    const q = query(collection(db, 'friendRequests'), where('receiverId', '==', currentUser.uid), where('status', '==', 'pending'));
     const unsub = onSnapshot(q, 
       async (snapshot) => {
         if (!isMounted) return;
