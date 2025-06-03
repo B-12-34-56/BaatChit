@@ -1,4 +1,4 @@
-import React, { useContext, useState, useRef } from 'react';
+import React, { useContext, useState, useRef, useEffect } from 'react';
 import { ChatContext } from '../../context/ChatContext';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth } from '../../utils/firebase';
@@ -30,6 +30,15 @@ const MessageInput = () => {
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef(null);
   const navigate = useNavigate();
+  const uploadTaskRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (uploadTaskRef.current) {
+        uploadTaskRef.current.cancel();
+      }
+    };
+  }, []);
 
   const handleSend = async (e) => {
     e.preventDefault();
@@ -41,10 +50,17 @@ const MessageInput = () => {
       setDuplicateWarning('');
       setUploading(true);
       try {
-        // Only Firebase Storage upload
-        imageUrl = await uploadImageToFirebase(imageFile, currentUser.uid);
+        const storage = getStorage();
+        const storageRef = ref(storage, `user_uploads/${currentUser.uid}/${imageFile.name}`);
+        uploadTaskRef.current = uploadBytes(storageRef, imageFile);
+        await uploadTaskRef.current;
+        imageUrl = await getDownloadURL(storageRef);
       } catch (err) {
-        setDuplicateWarning('Image upload failed.');
+        if (err.code === 'storage/canceled') {
+          console.log('Upload was canceled');
+        } else {
+          setDuplicateWarning('Image upload failed.');
+        }
         setUploading(false);
         return;
       }

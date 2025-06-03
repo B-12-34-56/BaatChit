@@ -177,8 +177,17 @@ service cloud.firestore {
                       && get(/databases/$(database)/documents/conversations/$(conversationId))
                            .data.participants.hasAny([request.auth.uid]);
 
-        // 4.7.2 Create: Allow any authenticated user to create messages for debugging
-        allow create, read, update, delete: if isAuthenticated(); // WARNING: Loosened for debugging. Restrict for production!
+        // 4.7.2 Create: Only conversation participants can create messages
+        allow create: if isAuthenticated()
+                      && get(/databases/$(database)/documents/conversations/$(conversationId))
+                           .data.participants.hasAny([request.auth.uid])
+                      && request.resource.data.keys().hasAll(['senderUid', 'text', 'timestamp', 'type'])
+                      && request.resource.data.senderUid == request.auth.uid
+                      && request.resource.data.timestamp == request.time
+                      && request.resource.data.type in ['text', 'image']
+                      && request.resource.data.text is string
+                      && request.resource.data.text.size() > 0
+                      && request.resource.data.text.size() <= 5000;
 
         // 4.7.3 Update: Only the original sender may edit their message. They can change:
         //       text, edited (bool), editedAt (serverTimestamp), deleted (bool), type.
