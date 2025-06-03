@@ -58,9 +58,13 @@ export const messageService = {
       const messageRef = doc(collection(db, 'conversations', conversationId, 'messages'));
       batch.set(messageRef, {
         text: message.text,
-        senderUID: message.senderUID,
+        senderUid: message.senderUid,
         timestamp: serverTimestamp(),
+        createdAt: serverTimestamp(),
         read: false,
+        delivered: false,
+        edited: false,
+        editedAt: null,
         type: message.type || 'text',
         imageUrl: message.imageUrl || null,
         imageHash: message.imageHash || null,
@@ -78,12 +82,16 @@ export const messageService = {
       batch.update(conversationRef, {
         lastMessage: message.text,
         lastMessageTime: serverTimestamp(),
-        lastMessageSender: message.senderUID,
-        [`unreadCount.${otherUserId}`]: currentUnreadCount + 1
+        lastMessageSender: message.senderUid,
+        [`unreadCount.${otherUserId}`]: currentUnreadCount + 1,
+        typing: {
+          [message.senderUid]: false,
+          [otherUserId]: false
+        }
       });
       
       // Update userChats for sender
-      const senderUserChatsRef = doc(db, 'userChats', message.senderUID);
+      const senderUserChatsRef = doc(db, 'userChats', message.senderUid);
       batch.set(senderUserChatsRef, {
         [conversationId]: {
           userInfo: {
@@ -101,7 +109,7 @@ export const messageService = {
       batch.set(recipientUserChatsRef, {
         [conversationId]: {
           userInfo: {
-            uid: message.senderUID,
+            uid: message.senderUid,
             displayName: message.senderDisplayName || 'Unknown',
             photoURL: message.senderPhotoURL || null,
           },
@@ -114,7 +122,7 @@ export const messageService = {
       
       console.log('Message sent:', {
         conversationId,
-        sender: message.senderUID,
+        sender: message.senderUid,
         recipient: otherUserId,
         message: message.text
       });
@@ -123,7 +131,7 @@ export const messageService = {
     } catch (error) {
       console.error('Error sending message:', error, {
         conversationId,
-        sender: message.senderUID,
+        sender: message.senderUid,
         recipient: recipientId
       });
       return { success: false, error: error.message };
@@ -169,7 +177,7 @@ export const messageService = {
       const messagesRef = collection(db, 'conversations', conversationId, 'messages');
       const q = query(
         messagesRef,
-        where('senderUID', '!=', userId),
+        where('senderUid', '!=', userId),
         where('read', '==', false)
       );
       

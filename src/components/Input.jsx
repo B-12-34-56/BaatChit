@@ -36,9 +36,10 @@ const Input = () => {
       const message = {
         id: uuid(),
         text: text.trim(),
-        senderId: currentUser.uid,
+        senderUid: currentUser.uid,
         date: Timestamp.now(),
         timestamp: serverTimestamp(),
+        createdAt: serverTimestamp(),
       };
 
       // Handle image upload if needed (you'll need to implement this)
@@ -71,8 +72,9 @@ const Input = () => {
       // Add message to messages subcollection
       await setDoc(doc(db, "conversations", data.chatId, "messages", message.id), {
         text: message.text,
-        senderId: message.senderId,
+        senderUid: message.senderUid,
         timestamp: serverTimestamp(),
+        createdAt: serverTimestamp(),
         read: false
       });
 

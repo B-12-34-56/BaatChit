@@ -2,19 +2,23 @@ import React, { useContext, useState, useRef } from 'react';
 import { ChatContext } from '../../context/ChatContext';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth } from '../../utils/firebase';
-// TODO: Adjust the import path if messageService is elsewhere
 import { messageService } from '../../services/messageService';
-import { useNavigate } from 'react-router-dom';
 import attachIcon from '../../img/attach.png';
 import reactIcon from '../../img/react-1-logo-black-and-white (1).png';
-import { getPresignedUrl, uploadFileToS3 } from '../../services/presignService';
-
-const PRESIGN_API_URL = process.env.REACT_APP_PRESIGN_API_URL;
+import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { useNavigate } from 'react-router-dom';
 
 async function getFileHash(file) {
   const arrayBuffer = await file.arrayBuffer();
   const hashBuffer = await window.crypto.subtle.digest('SHA-256', arrayBuffer);
   return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function uploadImageToFirebase(file, userId) {
+  const storage = getStorage();
+  const storageRef = ref(storage, `user_uploads/${userId}/${file.name}`);
+  await uploadBytes(storageRef, file);
+  return await getDownloadURL(storageRef);
 }
 
 const MessageInput = () => {
@@ -34,19 +38,11 @@ const MessageInput = () => {
     let imageUrl = null;
     if (imageFile) {
       imageHash = await getFileHash(imageFile);
-      // Check for duplicate again before sending (safety)
-      // const recentImages = await messageService.getRecentImageMessages(data.chatId, 20);
-      // if (recentImages.some(msg => msg.imageHash === imageHash)) {
-      //   setDuplicateWarning('Duplicate image detected!');
-      //   return;
-      // }
       setDuplicateWarning('');
       setUploading(true);
       try {
-        // 1. Get presigned URL
-        const presignedUrl = await getPresignedUrl(imageFile.name, imageFile.type, PRESIGN_API_URL);
-        // 2. Upload to S3
-        imageUrl = await uploadFileToS3(presignedUrl, imageFile);
+        // Only Firebase Storage upload
+        imageUrl = await uploadImageToFirebase(imageFile, currentUser.uid);
       } catch (err) {
         setDuplicateWarning('Image upload failed.');
         setUploading(false);
@@ -57,7 +53,7 @@ const MessageInput = () => {
     await messageService.sendMessage(
       data.chatId,
       {
-        senderUID: currentUser.uid,
+        senderUid: currentUser.uid,
         senderDisplayName: currentUser.displayName,
         senderPhotoURL: currentUser.photoURL,
         recipientDisplayName: data.user?.displayName,
@@ -66,8 +62,9 @@ const MessageInput = () => {
         type: imageFile ? 'image' : 'text',
         imageUrl,
         imageHash,
+        createdAt: new Date(),
       },
-      data.user?.uid // recipientId
+      data.user?.uid
     );
     setText('');
     setImageFile(null);
@@ -77,28 +74,15 @@ const MessageInput = () => {
     fileInputRef.current.click();
   };
 
+  const handleReactIconClick = () => {
+    navigate('/upload'); // Go to Upload.jsx for S3 logic
+  };
+
   const handleFileChange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    if (!data.chatId) {
-      setImageFile(file);
-      setDuplicateWarning('');
-      return;
-    }
-    const hash = await getFileHash(file);
-    // Fetch last 20 image messages in this chat
-    // const recentImages = await messageService.getRecentImageMessages(data.chatId, 20);
-    // if (recentImages.some(msg => msg.imageHash === hash)) {
-    //   setDuplicateWarning('Duplicate image detected!');
-    //   setImg(null);
-    //   return;
-    // }
-    setDuplicateWarning('');
     setImageFile(file);
-  };
-
-  const handleReactIconClick = () => {
-    navigate('/upload');
+    setDuplicateWarning('');
   };
 
   return (
@@ -110,9 +94,13 @@ const MessageInput = () => {
         style={{ flex: 1, padding: '10px 16px', borderRadius: 8, border: '1px solid #e0e0e0', fontSize: 16, outline: 'none' }}
         disabled={uploading}
       />
-      {/* Pin/Attach icon */}
-      <button type="button" onClick={handleAttachClick} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center' }} title="Attach image" disabled={uploading}>
+      {/* Pin/Attach icon (Firebase Storage) */}
+      <button type="button" onClick={handleAttachClick} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center' }} title="Attach image (Firebase)" disabled={uploading}>
         <img src={attachIcon} alt="Attach" style={{ width: 26, height: 26, opacity: 0.8 }} />
+      </button>
+      {/* React icon (S3) navigates to Upload.jsx */}
+      <button type="button" onClick={handleReactIconClick} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center' }} title="Go to S3 Upload" disabled={uploading}>
+        <img src={reactIcon} alt="Upload" style={{ width: 26, height: 26, opacity: 0.8 }} />
       </button>
       <input
         type="file"
@@ -122,10 +110,6 @@ const MessageInput = () => {
         style={{ display: 'none' }}
         disabled={uploading}
       />
-      {/* React icon for upload page */}
-      <button type="button" onClick={handleReactIconClick} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center' }} title="Go to Upload" disabled={uploading}>
-        <img src={reactIcon} alt="Upload" style={{ width: 26, height: 26, opacity: 0.8 }} />
-      </button>
       <button type="submit" style={{ padding: '10px 22px', borderRadius: 8, background: '#667eea', color: '#fff', border: 'none', fontWeight: 600, fontSize: 16, cursor: 'pointer', transition: 'background 0.2s' }} disabled={uploading}>
         {uploading ? 'Uploading…' : 'Send'}
       </button>

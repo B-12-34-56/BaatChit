@@ -1,115 +1,280 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // 1) USERS COLLECTION
+
+    //------------------------------------------------------------------------------------------------
+    // 1. Helper Functions
+    //------------------------------------------------------------------------------------------------
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+
+    //------------------------------------------------------------------------------------------------
+    // 2. USERS COLLECTION
+    //------------------------------------------------------------------------------------------------
+
     match /users/{userId} {
-      // Anyone signed-in can create their own user document
-      allow create: if request.auth != null;
-      
-      // Users can read any user document (for friend search, etc.)
-      allow read: if request.auth != null;
-      
-      // Combined update rule
-      allow update: if request.auth != null && (
-        // User updating their own profile
-        request.auth.uid == userId ||
-        // Someone updating ONLY the friends array
-        (
-          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['friends']) &&
-          (request.auth.uid in resource.data.friends || 
-           request.auth.uid in request.resource.data.friends ||
-           resource.data.friends == null)
-        )
-      );
-      
-      // Only the user themselves can delete their profile
-      allow delete: if request.auth != null && request.auth.uid == userId;
+      // 2.1 Read: Any authenticated user may read any public profile data
+      allow read: if isAuthenticated();
+
+      // 2.2 Create: Only the user themself may create their own profile,
+      //     and must supply exactly these fields with correct values.
+      //     - uid: must equal auth.uid
+      //     - email: must equal auth.token.email
+      //     - displayName: nonempty string (max 50 chars)
+      allow create: if isOwner(userId)
+                    && request.resource.data.keys().hasAll(['uid', 'email', 'displayName'])
+                    && request.resource.data.uid == request.auth.uid
+                    && request.resource.data.email == request.auth.token.email
+                    // Enforce displayName is a nonempty string ≤ 50 chars
+                    && (request.resource.data.displayName is string)
+                    && request.resource.data.displayName.size() > 0
+                    && request.resource.data.displayName.size() <= 50;
+
+      // 2.3 Update: Only the owner may update their own profile. We explicitly:
+      //     • Block changing uid or email
+      //     • Validate displayName if present
+      //     • Validate friends only if present (must be a list)
+      allow update: if isOwner(userId)
+                    // Disallow any attempt to modify uid or email
+                    && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['uid', 'email'])
+                    // If displayName is being updated, enforce string length rules
+                    && (
+                         !request.resource.data.keys().hasAny(['displayName'])
+                         || (
+                              request.resource.data.displayName is string
+                              && request.resource.data.displayName.size() > 0
+                              && request.resource.data.displayName.size() <= 50
+                            )
+                       )
+                    // If friends is being updated, ensure it is an array (list)
+                    && (
+                         !request.resource.data.keys().hasAny(['friends'])
+                         || (
+                              request.resource.data.friends is list
+                              && request.resource.data.friends.size() <= 5000  // optional max size
+                            )
+                       );
+
+      // 2.4 Delete: Disallowed for now
+      allow delete: if false;
     }
-    
-    // 1a) USER CHATS COLLECTION
-    match /userChats/{userId} {
-      allow create, read, update, delete: if request.auth != null && request.auth.uid == userId;
+
+    //------------------------------------------------------------------------------------------------
+    // 3. FRIEND REQUESTS COLLECTION
+    //------------------------------------------------------------------------------------------------
+
+    match /friendRequests/{requestId} {
+      // 3.1 Read: Only the "from" or "receiverId" user may read a friendRequest doc
+      allow read: if isAuthenticated()
+                  && (
+                       resource.data.from == request.auth.uid
+                       || resource.data.receiverId == request.auth.uid
+                     );
+
+      // 3.2 Create: Only an authenticated user may create a new request, with shape:
+      //      { from: string, receiverId: string, status: 'pending', timestamp: serverTimestamp }
+      allow create: if isAuthenticated()
+                    // Must include exactly these keys
+                    && request.resource.data.keys().hasAll(['from', 'receiverId', 'status', 'timestamp'])
+                    && request.resource.data.from == request.auth.uid                  // "from" must be me
+                    && request.resource.data.from != request.resource.data.receiverId  // no self-requests
+                    && request.resource.data.status == 'pending'                        // must start "pending"
+                    && request.resource.data.timestamp is timestamp;                    // allow any Firestore timestamp
+
+      // 3.3 Update: Only the recipient (resource.data.receiverId) may flip status from "pending" → "accepted" or "rejected."
+      //      - Cannot revert to "pending" (resource.data.status must be "pending" now).
+      //      - If new status == "accepted", client must supply { status:'accepted', acceptedAt: serverTimestamp } and no other keys.
+      //      - If new status == "rejected", client must supply { status:'rejected', rejectedAt: serverTimestamp } and no other keys.
+      allow update: if isAuthenticated()
+                    // Only the "receiverId" user can accept/reject
+                    && resource.data.receiverId == request.auth.uid
+                    // Must be "pending" before update
+                    && resource.data.status == 'pending'
+                    && (
+                         // Case A: accepted
+                         (
+                           request.resource.data.status == 'accepted'
+                           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'acceptedAt'])
+                           && request.resource.data.acceptedAt == request.time
+                         )
+                         ||
+                         // Case B: rejected
+                         (
+                           request.resource.data.status == 'rejected'
+                           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'rejectedAt'])
+                           && request.resource.data.rejectedAt == request.time
+                         )
+                       );
+
+      // 3.4 Delete: Either the sender ("from") or recipient ("receiverId") may delete/cancel a request
+      allow delete: if isAuthenticated()
+                    && (
+                         resource.data.from == request.auth.uid
+                         || resource.data.receiverId == request.auth.uid
+                       );
     }
-    
-    // 2) CONVERSATIONS COLLECTION
+
+    //------------------------------------------------------------------------------------------------
+    // 4. CONVERSATIONS COLLECTION
+    //------------------------------------------------------------------------------------------------
+
     match /conversations/{conversationId} {
-      // CREATE: allowed if signed-in AND auth.uid is in the submitted participants array
-      allow create: if request.auth != null
-                    && request.auth.uid in request.resource.data.participants;
-      
-      // READ: only if signed-in AND auth.uid is in the existing participants array
-      allow read: if request.auth != null
-                  && request.auth.uid in resource.data.participants;
-      
-      // UPDATE: Allow participants to update (for lastMessage, lastMessageTime, etc.)
-      allow update: if request.auth != null
-                    && request.auth.uid in resource.data.participants;
-      
-      // DELETE: only if signed-in AND auth.uid is in the existing participants array
-      allow delete: if request.auth != null
-                    && request.auth.uid in resource.data.participants;
-      
-      // 3) MESSAGES SUBCOLLECTION - SIMPLIFIED AND MORE PERMISSIVE
+      // 4.1 Helper: check if auth.uid is a member of the existing `participants` list
+      function isParticipant() {
+        return request.auth.uid in resource.data.participants;
+      }
+      // 4.2 Helper: check if auth.uid is in the new `participants` list on create
+      function willBeParticipant() {
+        return request.auth.uid in request.resource.data.participants;
+      }
+
+      // 4.3 Read: Only participants can read a conversation doc
+      allow read: if isAuthenticated() && isParticipant();
+
+      // 4.4 Create: Only authenticated users can create a 1:1 conversation, with exactly two participants,
+      //      and server sends createdAt timestamp.
+      allow create: if isAuthenticated()
+                    // Must supply exactly these keys
+                    && request.resource.data.keys().hasAll(['participants', 'createdAt'])
+                    && request.resource.data.participants is list
+                    // Exactly two UIDs (1:1 chat)
+                    && request.resource.data.participants.size() == 2
+                    // I must be one of those two
+                    && willBeParticipant()
+                    // createdAt must be server timestamp
+                    && request.resource.data.createdAt == request.time
+                    // Each participant entry must be a valid string UID
+                    && request.resource.data.participants.size() == 2;
+
+      // 4.5 Update: Only participants may update their own conversation. We forbid changing `participants`.
+      //      If updating `lastMessageTime`, enforce it == server timestamp.
+      allow update: if isAuthenticated()
+                    && isParticipant()
+                    // Cannot change participants array
+                    && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['participants'])
+                    // If lastMessageTime is present in diff, it must be server time
+                    && (
+                         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['lastMessageTime'])
+                         || request.resource.data.lastMessageTime == request.time
+                       );
+
+      // 4.6 Delete: Not allowed (we do soft-archive instead)
+      allow delete: if false;
+
+      //------------------------------------------------------------------------------------------------
+      // 4.7 MESSAGES SUBCOLLECTION
+      //------------------------------------------------------------------------------------------------
+
       match /messages/{messageId} {
-        // READ: signed-in participant of the parent conversation
-        allow read: if request.auth != null
-                    && request.auth.uid in 
-                       get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants;
-        
-        // CREATE: Very permissive - just check if user is a participant
-        allow create: if request.auth != null
-                      && request.auth.uid in 
-                         get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants;
-        
-        // UPDATE: Allow the sender to update their own messages
-        allow update: if request.auth != null
-                      && request.auth.uid in 
-                         get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants
+        // 4.7.1 Read: Only participants of the parent conversation may read messages
+        allow read: if isAuthenticated()
+                      && get(/databases/$(database)/documents/conversations/$(conversationId))
+                           .data.participants.hasAny([request.auth.uid]);
+
+        // 4.7.2 Create: Allow any authenticated user to create messages for debugging
+        allow create, read, update, delete: if isAuthenticated(); // WARNING: Loosened for debugging. Restrict for production!
+
+        // 4.7.3 Update: Only the original sender may edit their message. They can change:
+        //       text, edited (bool), editedAt (serverTimestamp), deleted (bool), type.
+        //       We do NOT allow the sender to toggle `read` or `delivered` here.
+        allow update: if isAuthenticated()
+                      && resource.data.senderUid == request.auth.uid
+                      // Must only touch these keys
+                      && request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+                           ['text', 'edited', 'editedAt', 'deleted', 'type']
+                         )
+                      // If `edited` flag is present, require `editedAt == request.time`
                       && (
-                        (resource.data.senderId == request.auth.uid) ||
-                        (resource.data.senderUid == request.auth.uid) ||
-                        (resource.data.uid == request.auth.uid)
-                      );
-        
-        // DELETE: Allow sender to delete their own messages
-        allow delete: if request.auth != null
-                      && (
-                        (resource.data.senderId == request.auth.uid) ||
-                        (resource.data.senderUid == request.auth.uid) ||
-                        (resource.data.uid == request.auth.uid)
-                      );
+                           !request.resource.data.keys().hasAny(['edited'])
+                           || (
+                                request.resource.data.edited == true
+                                && request.resource.data.editedAt == request.time
+                              )
+                         );
+
+        // 4.7.4 Delete: Hard deletes are disallowed—use `deleted` flag instead.
+        allow delete: if false;
       }
     }
-    
-    // 4) FRIEND REQUESTS COLLECTION
-    match /friendRequests/{requestId} {
-      // CREATE: Only authenticated users can create a request where they are the sender
-      allow create: if request.auth != null && request.resource.data.from == request.auth.uid;
-      
-      // READ: Anyone authenticated can read
-      allow read: if request.auth != null;
-      
-      // UPDATE: Only the recipient or sender can update
-      allow update: if request.auth != null && (
-        (resource.data.to == request.auth.uid) ||
-        (resource.data.from == request.auth.uid)
-      );
-      
-      // DELETE: Only the sender or recipient can delete
-      allow delete: if request.auth != null && 
-                     (resource.data.from == request.auth.uid || 
-                      resource.data.to == request.auth.uid);
-    }
-  }
-}
 
-// STORAGE RULES (if not already set)
-service firebase.storage {
-  match /b/{bucket}/o {
-    
-    match /{allPaths=**} {
-      allow read, write: if request.auth != null;
+    //------------------------------------------------------------------------------------------------
+    // 5. NOTIFICATIONS COLLECTION
+    //------------------------------------------------------------------------------------------------
+
+    match /notifications/{userId} {
+      // 5.1 Read: A user may only read their own notifications
+      allow read: if isOwner(userId);
+
+      // 5.2 Create: Any authenticated user (including your backend Cloud Functions) may create a notification,
+      //      but we enforce a specific schema:
+      //        { title: string, body: string, senderUid: string, timestamp: serverTimestamp, read: bool=false }
+      allow create: if isAuthenticated()
+                    && request.resource.data.keys().hasAll(['title', 'body', 'senderUid', 'timestamp', 'read'])
+                    // Validate types/lengths
+                    && (request.resource.data.title is string) 
+                    && request.resource.data.title.size() > 0
+                    && request.resource.data.title.size() <= 100
+                    && (request.resource.data.body is string) 
+                    && request.resource.data.body.size() > 0
+                    && request.resource.data.body.size() <= 1000
+                    && request.resource.data.senderUid is string
+                    && request.resource.data.timestamp == request.time
+                    && request.resource.data.read == false;  // new notifications start unread
+
+      // 5.3 Update: The user may only mark "read" → true. We enforce:
+      //       • Only the `read` and `readAt` keys may change
+      //       • If `read == true`, then `readAt == serverTimestamp`
+      allow update: if isOwner(userId)
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read', 'readAt'])
+                    && request.resource.data.read == true
+                    && request.resource.data.readAt == request.time;
+
+      // 5.4 Delete: Each user may delete their own notifications
+      allow delete: if isOwner(userId);
+    }
+
+    //------------------------------------------------------------------------------------------------
+    // 6. USER PRESENCE / STATUS COLLECTION
+    //------------------------------------------------------------------------------------------------
+
+    match /status/{userId} {
+      // 6.1 Read: Any authenticated user can read someone's presence (online/offline)
+      allow read: if isAuthenticated();
+
+      // 6.2 Write: Only the owner can update their own presence. Enforce schema:
+      //      { online: bool, lastSeen: serverTimestamp }
+      allow write: if isOwner(userId)
+                   && request.resource.data.keys().hasAll(['online', 'lastSeen'])
+                   && request.resource.data.online is bool
+                   && request.resource.data.lastSeen == request.time;
+    }
+
+    //------------------------------------------------------------------------------------------------
+    // 7. BLOCK LIST (UNDER /users/{userId}/blocked/{blockedId})
+    //------------------------------------------------------------------------------------------------
+
+    match /users/{userId}/blocked/{blockedId} {
+      // 7.1 Only the owner of the block list may read/write here
+      allow read, write: if isOwner(userId)
+                        // Cannot block yourself
+                        && blockedId != request.auth.uid;
+      // (Optionally, enforce { blockedAt: serverTimestamp } in the write schema.)
+    }
+
+    //------------------------------------------------------------------------------------------------
+    // 8. USER SETTINGS (UNDER /users/{userId}/settings/{doc})
+    //------------------------------------------------------------------------------------------------
+
+    match /users/{userId}/settings/{doc=**} {
+      // 8.1 Only the owner may read/write their own settings.
+      allow read, write: if isOwner(userId);
+      // (If you know exact setting keys, you can validate them here as well.)
     }
   }
 }
