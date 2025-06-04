@@ -27,13 +27,9 @@ const Chat = () => {
       flex: 1,
       display: 'flex',
       flexDirection: 'column',
-      background: 'linear-gradient(135deg, #f7f8fa 0%, #e3e6f3 100%)',
-      borderRadius: 18,
-      margin: '18px 18px 18px 0',
-      boxShadow: '0 2px 8px rgba(44,62,80,0.06)',
-      minWidth: 0,
-      minHeight: 0,
       overflow: 'hidden',
+      position: 'relative',
+      background: '#fff',
     }}>
       <div style={{
         display: 'flex',
@@ -75,8 +71,10 @@ const Chat = () => {
           </div>
         )}
       </div>
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
-        <MessageList />
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', overflow: 'hidden' }}>
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+          <MessageList />
+        </div>
         <MessageInput />
       </div>
     </div>

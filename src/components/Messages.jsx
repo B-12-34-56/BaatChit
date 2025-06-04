@@ -1,8 +1,6 @@
 import { collection, onSnapshot, orderBy, query } from 'firebase/firestore';
-import { collection, onSnapshot, orderBy, query } from 'firebase/firestore';
 import React, { useContext, useEffect, useState } from 'react'
 import { ChatContext } from '../context/ChatContext';
-import { db } from '../utils/firebase';
 import { db } from '../utils/firebase';
 import Message from './Message'
 
@@ -12,14 +10,11 @@ const Messages = () => {
 
   useEffect(() => {
     if (!data.chatId || typeof data.chatId !== 'string' || !data.chatId.trim()) return;
-    
     let isMounted = true;
-    
     const q = query(
       collection(db, 'conversations', data.chatId, 'messages'),
       orderBy('timestamp', 'asc')
     );
-    
     const unsub = onSnapshot(q, 
       (querySnapshot) => {
         if (!isMounted) return;
@@ -32,13 +27,9 @@ const Messages = () => {
         console.error('Message listener error:', error);
       }
     );
-    
     return () => {
       isMounted = false;
-      isMounted = false;
       unsub();
-    };
-  }, [data.chatId]);
     };
   }, [data.chatId]);
 
@@ -51,4 +42,4 @@ const Messages = () => {
   )
 }
 
-export default Messages
+export default Messages;

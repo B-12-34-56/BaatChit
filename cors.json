@@ -1,11 +1,8 @@
 [
   {
-    "origin": [
-      "https://baatchit.net",
-      "https://messagingapp-cc6ec.web.app"
-    ],
-    "method": ["GET", "POST", "PUT", "DELETE", "HEAD"],
+    "origin": ["*"],
+    "method": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     "maxAgeSeconds": 3600,
-    "responseHeader": ["Content-Type", "Authorization"]
+    "responseHeader": ["Content-Type", "Authorization", "x-goog-meta-*"]
   }
 ]
