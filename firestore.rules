@@ -39,5 +39,10 @@ service cloud.firestore {
     match /user_upload_logs/{docId} {
       allow read, write: if request.auth != null;
     }
+
+    // NEW: Allow authenticated users to read and write documents in the global_upload_logs collection
+    match /global_upload_logs/{fileHash} {
+      allow read, write: if request.auth != null;
+    }
   }
 }
