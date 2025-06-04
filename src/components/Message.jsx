@@ -36,7 +36,9 @@ const Message = ({ message }) => {
             marginBottom: 4,
           }}
         />
-        <span style={{ fontSize: 11, color: '#aaa', marginTop: 2 }}>just now</span>
+        <span style={{ fontSize: 11, color: '#aaa', marginTop: 2 }}>
+          {message.createdAt ? (new Date(message.createdAt.seconds ? message.createdAt.seconds * 1000 : message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })) : 'just now'}
+        </span>
       </div>
       <div style={{
         maxWidth: 340,
