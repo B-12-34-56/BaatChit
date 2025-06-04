@@ -1,6 +1,8 @@
 import { collection, onSnapshot, orderBy, query } from 'firebase/firestore';
+import { collection, onSnapshot, orderBy, query } from 'firebase/firestore';
 import React, { useContext, useEffect, useState } from 'react'
 import { ChatContext } from '../context/ChatContext';
+import { db } from '../utils/firebase';
 import { db } from '../utils/firebase';
 import Message from './Message'
 
@@ -33,7 +35,10 @@ const Messages = () => {
     
     return () => {
       isMounted = false;
+      isMounted = false;
       unsub();
+    };
+  }, [data.chatId]);
     };
   }, [data.chatId]);
 

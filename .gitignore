@@ -46,3 +46,6 @@ yarn-error.log*
 /coverage/
 
 serviceAccountKey.json
+
+# Ignore Firebase credentials
+src/utils/firebase.js
