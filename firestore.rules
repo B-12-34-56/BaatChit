@@ -1,22 +1,18 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Allow any authenticated user to read/write the top-level 'rooms' collection:
+    // Allow any authenticated user to read/write the top-level 'rooms' collection and its subcollections
     match /rooms/{roomId} {
       allow read, write: if request.auth != null;
-
-      // Allow any authenticated user to read/write messages inside a room
       match /messages/{messageId} {
         allow read, write: if request.auth != null;
       }
-
-      // Also allow any authenticated user to read/write the members subcollection
       match /members/{memberId} {
         allow read, write: if request.auth != null;
       }
     }
 
-    // If you have a "conversations" collection, allow everything there as well:
+    // Allow any authenticated user to read/write the conversations collection and its subcollections
     match /conversations/{convoId} {
       allow read, write: if request.auth != null;
       match /messages/{messageId} {
@@ -24,18 +20,23 @@ service cloud.firestore {
       }
     }
 
-    // Loosen friendRequests completely:
+    // Allow any authenticated user to read/write the friendRequests collection
     match /friendRequests/{requestId} {
       allow read, write: if request.auth != null;
     }
 
-    // Loosen users collection so clients can read/write their own profile freely:
+    // Allow any authenticated user to read/write their own user profile
     match /users/{userId} {
       allow read, write: if request.auth != null;
     }
 
-    // If you have a userChats or rooms subcollection under userChats, open that too:
+    // Allow any authenticated user to read/write their userChats
     match /userChats/{userId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Allow authenticated users to read and write documents in the user_upload_logs collection
+    match /user_upload_logs/{docId} {
       allow read, write: if request.auth != null;
     }
   }
