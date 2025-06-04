@@ -13,31 +13,46 @@ async function getFileHash(file) {
   return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-// Firestore-based duplicate and count check
-async function getUploadLog(userId, fileHash) {
+// GLOBAL duplicate and count check - changed from per-user to global
+async function getUploadLog(fileHash) {
   const db = getFirestore();
-  const logRef = doc(db, "user_upload_logs", `${userId}_${fileHash}`);
+  // Changed: Using global_upload_logs instead of user_upload_logs
+  const logRef = doc(db, "global_upload_logs", fileHash);
   const logSnap = await getDoc(logRef);
   return logSnap.exists() ? logSnap.data() : null;
 }
 
-async function incrementUploadLog(userId, fileHash, fileName) {
+async function incrementUploadLog(userId, userName, fileHash, fileName) {
   const db = getFirestore();
-  const logRef = doc(db, "user_upload_logs", `${userId}_${fileHash}`);
+  // Changed: Using global_upload_logs instead of user_upload_logs
+  const logRef = doc(db, "global_upload_logs", fileHash);
   const logSnap = await getDoc(logRef);
+  
+  const uploadEntry = {
+    userId,
+    userName: userName || 'Anonymous',
+    timestamp: Date.now()
+  };
+  
   if (logSnap.exists()) {
+    const currentData = logSnap.data();
     await updateDoc(logRef, {
-      count: logSnap.data().count + 1,
+      count: currentData.count + 1,
       lastUploadedAt: serverTimestamp(),
       fileName,
+      // Store upload history for UI display
+      uploads: [...(currentData.uploads || []), uploadEntry]
     });
   } else {
     await setDoc(logRef, {
-      userId,
       fileHash,
       count: 1,
       lastUploadedAt: serverTimestamp(),
       fileName,
+      // Store first upload info
+      firstUploaderId: userId,
+      firstUploaderName: userName || 'Anonymous',
+      uploads: [uploadEntry]
     });
   }
 }
@@ -89,32 +104,59 @@ const MessageInput = () => {
       setDuplicateWarning('');
       setUploading(true);
       try {
-        // Firestore-based duplicate and count check
-        const log = await getUploadLog(currentUser.uid, imageHash);
+        // GLOBAL duplicate and count check - no userId needed
+        console.log('Checking for duplicates...');
+        const log = await getUploadLog(imageHash);
+        console.log('Duplicate check result:', log);
+        
         if (log && log.count >= 2) {
-          setDuplicateWarning('You have already uploaded this image twice. Upload blocked.');
+          // Show who uploaded it before in the warning
+          const firstUploader = log.firstUploaderName || 'Someone';
+          const secondUploader = log.uploads && log.uploads[1] ? log.uploads[1].userName : 'Someone else';
+          setDuplicateWarning(`This image has already been uploaded twice (first by ${firstUploader}, then by ${secondUploader}). Upload blocked.`);
           setUploading(false);
           return;
         } else if (log && log.count === 1) {
           // Allow upload, mark as duplicate
           imageTag = 'duplicate';
-          setDuplicateWarning(`Duplicate detected! You have uploaded this image before. [DUPLICATE]`);
+          const firstUploader = log.firstUploaderName || 'Someone';
+          setDuplicateWarning(`Duplicate detected! This image was first uploaded by ${firstUploader}. [DUPLICATE]`);
         } else {
           // First upload
           imageTag = 'original';
           setDuplicateWarning('New image uploaded successfully! [ORIGINAL]');
         }
-        // Always upload a new file (for demo, you could optimize to reuse URL if you want)
+        
+        // Always upload a new file
+        console.log('Uploading to Firebase Storage...');
         imageUrl = await uploadImageToFirebase(imageFile, currentUser.uid, imageHash);
-        // Increment log in Firestore
-        await incrementUploadLog(currentUser.uid, imageHash, imageFile.name);
+        console.log('Upload successful, URL:', imageUrl);
+        
+        // Increment log in Firestore with user info
+        console.log('Updating global upload log...');
+        await incrementUploadLog(
+          currentUser.uid, 
+          currentUser.displayName || currentUser.email, 
+          imageHash, 
+          imageFile.name
+        );
+        console.log('Global log updated');
       } catch (err) {
-        setDuplicateWarning('Image upload failed.');
+        console.error('Upload error:', err);
+        console.error('Error details:', {
+          message: err.message,
+          code: err.code,
+          stack: err.stack
+        });
+        setDuplicateWarning(`Image upload failed: ${err.message || 'Unknown error'}`);
         setUploading(false);
         return;
       }
       setUploading(false);
     }
+    
+    // Send message
+    console.log('Sending message...');
     await messageService.sendMessage(
       data.chatId,
       {
