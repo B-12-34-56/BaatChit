@@ -7,6 +7,7 @@ import { db } from '../../utils/firebase';
 import { doc, onSnapshot, collection, query, where, getDocs, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth } from '../../utils/firebase';
+import { getOrCreateConversation } from '../../services/conversationService';
 
 const FriendList = () => {
   const { dispatch } = useContext(ChatContext);
@@ -62,62 +63,16 @@ const FriendList = () => {
 
   const handleStartChat = async (friend) => {
     try {
-      // Create combined ID
-      const combinedId = 
-        currentUser.uid > friend.uid
-          ? currentUser.uid + friend.uid
-          : friend.uid + currentUser.uid;
-
-      // Ensure userChats documents exist for both users
-      const currentUserChatsRef = doc(db, "userChats", currentUser.uid);
-      const friendChatsRef = doc(db, "userChats", friend.uid);
-
-      // Update userChats for current user
-      await setDoc(currentUserChatsRef, {
-        [combinedId]: {
-          userInfo: {
-            uid: friend.uid,
-            displayName: friend.displayName,
-            photoURL: friend.photoURL || null,
-          },
-          date: serverTimestamp(),
-          lastMessage: null
-        }
-      }, { merge: true });
-
-      // Update userChats for friend
-      await setDoc(friendChatsRef, {
-        [combinedId]: {
-          userInfo: {
-            uid: currentUser.uid,
-            displayName: currentUser.displayName,
-            photoURL: currentUser.photoURL || null,
-          },
-          date: serverTimestamp(),
-          lastMessage: null
-        }
-      }, { merge: true });
-
-      // Create conversation document if it doesn't exist
-      const conversationRef = doc(db, "conversations", combinedId);
-      await setDoc(conversationRef, {
-        participants: [currentUser.uid, friend.uid].sort(),
-        createdAt: serverTimestamp(),
-        lastMessage: null,
-        lastMessageTime: null
-      }, { merge: true });
-
-      // Open the chat
+      const convId = await getOrCreateConversation(currentUser.uid, friend.uid);
       dispatch({ 
         type: "CHANGE_USER", 
         payload: {
           uid: friend.uid,
           displayName: friend.displayName,
           photoURL: friend.photoURL,
-          chatId: combinedId
+          chatId: convId
         }
       });
-
       toast.success('Chat started!');
     } catch (error) {
       console.error('Error starting chat:', error);

@@ -4,11 +4,16 @@ import { db } from '../../utils/firebase';
 import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
 import Message from '../Message';
 import { VariableSizeList } from 'react-window';
+import { useAuthState } from 'react-firebase-hooks/auth';
+import { auth } from '../../utils/firebase';
+import { messageService } from '../../services/messageService';
 
-const MessageList = () => {
+const MessageList = ({ p2pModalOpen }) => {
   const { data } = useContext(ChatContext);
+  const [currentUser] = useAuthState(auth);
   const dummy = useRef();
   const [messages, setMessages] = useState([]);
+  const [typingStatus, setTypingStatus] = useState({});
 
   useEffect(() => {
     if (!data.chatId) return;
@@ -29,17 +34,24 @@ const MessageList = () => {
       }
     );
 
+    // Typing indicator subscription
+    let unsubTyping = null;
+    if (data.chatId) {
+      unsubTyping = messageService.subscribeToTyping(data.chatId, setTypingStatus);
+    }
+
     return () => {
       isMounted = false;
       unsub();
+      if (unsubTyping) unsubTyping();
     };
   }, [data.chatId]);
 
   useEffect(() => {
-    if (dummy.current) {
+    if (!p2pModalOpen && dummy.current) {
       dummy.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages]);
+  }, [messages, p2pModalOpen]);
 
   const getMessageHeight = (msg) => {
     // Estimate or calculate message height based on content
@@ -53,6 +65,10 @@ const MessageList = () => {
   if (!messages) return <div>No messages yet.</div>;
 
   if (messages.length === 0) return <div>No messages yet.</div>;
+
+  // Determine if the other user is typing
+  const otherUserId = data.user?.uid;
+  const isOtherUserTyping = typingStatus && otherUserId && typingStatus[otherUserId];
 
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: '16px 0', height: 600 }}>
@@ -69,6 +85,11 @@ const MessageList = () => {
         )}
       </VariableSizeList>
       <div ref={dummy}></div>
+      {isOtherUserTyping && (
+        <div style={{ padding: '8px 18px', color: '#667eea', fontWeight: 600, fontSize: 15 }}>
+          {data.user?.displayName || 'User'} is typing...
+        </div>
+      )}
     </div>
   );
 };

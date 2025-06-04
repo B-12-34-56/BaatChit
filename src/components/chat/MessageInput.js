@@ -4,21 +4,15 @@ import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth } from '../../utils/firebase';
 import { messageService } from '../../services/messageService';
 import attachIcon from '../../img/attach.png';
-import reactIcon from '../../img/react-1-logo-black-and-white (1).png';
-import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import { useNavigate } from 'react-router-dom';
+import { getPresignedUrl, uploadFileToS3 } from '../../services/presignService';
+import { getImageTag } from '../../services/getTagService';
+
+const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5MB
 
 async function getFileHash(file) {
   const arrayBuffer = await file.arrayBuffer();
   const hashBuffer = await window.crypto.subtle.digest('SHA-256', arrayBuffer);
   return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
-async function uploadImageToFirebase(file, userId) {
-  const storage = getStorage();
-  const storageRef = ref(storage, `user_uploads/${userId}/${file.name}`);
-  await uploadBytes(storageRef, file);
-  return await getDownloadURL(storageRef);
 }
 
 const MessageInput = () => {
@@ -29,44 +23,60 @@ const MessageInput = () => {
   const [duplicateWarning, setDuplicateWarning] = useState('');
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef(null);
-  const navigate = useNavigate();
-  const uploadTaskRef = useRef(null);
+  const typingTimeoutRef = useRef(null);
 
-  useEffect(() => {
-    return () => {
-      if (uploadTaskRef.current) {
-        uploadTaskRef.current.cancel();
-      }
-    };
-  }, []);
+  // Typing indicator logic
+  const handleTyping = async (e) => {
+    setText(e.target.value);
+    if (!data.chatId || !currentUser?.uid) return;
+    // Set typing true
+    messageService.setTypingStatus(data.chatId, currentUser.uid, true);
+    // Clear previous timeout
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    // Set typing false after 1.5s of inactivity
+    typingTimeoutRef.current = setTimeout(() => {
+      messageService.setTypingStatus(data.chatId, currentUser.uid, false);
+    }, 1500);
+  };
 
   const handleSend = async (e) => {
     e.preventDefault();
     if ((!text.trim() && !imageFile) || !data.chatId) return;
     let imageHash = null;
     let imageUrl = null;
+
+    // Image upload logic (S3)
     if (imageFile) {
+      if (imageFile.size > MAX_IMAGE_SIZE) {
+        setDuplicateWarning('Image is too large (max 5MB).');
+        setUploading(false);
+        return;
+      }
       imageHash = await getFileHash(imageFile);
       setDuplicateWarning('');
       setUploading(true);
       try {
-        const storage = getStorage();
-        const storageRef = ref(storage, `user_uploads/${currentUser.uid}/${imageFile.name}`);
-        uploadTaskRef.current = uploadBytes(storageRef, imageFile);
-        await uploadTaskRef.current;
-        imageUrl = await getDownloadURL(storageRef);
-      } catch (err) {
-        if (err.code === 'storage/canceled') {
-          console.log('Upload was canceled');
-        } else {
-          setDuplicateWarning('Image upload failed.');
+        // Check for duplicate using getTagService (by hash or filename)
+        const tagResult = await getImageTag(imageFile.name);
+        if (tagResult && tagResult.duplicate) {
+          setDuplicateWarning('Duplicate image detected.');
+          setUploading(false);
+          return;
         }
+        // Upload to S3
+        const presignApiUrl = process.env.REACT_APP_PRESIGN_API_URL || process.env.PRESIGN_API_URL;
+        const presignedUrl = await getPresignedUrl(imageFile.name, imageFile.type, presignApiUrl);
+        imageUrl = await uploadFileToS3(presignedUrl, imageFile);
+      } catch (err) {
+        setDuplicateWarning('Image upload failed: ' + (err.message || 'Unknown error'));
         setUploading(false);
         return;
       }
       setUploading(false);
     }
-    await messageService.sendMessage(
+
+    // Send the message (text or image)
+    const result = await messageService.sendMessage(
       data.chatId,
       {
         senderUid: currentUser.uid,
@@ -78,20 +88,21 @@ const MessageInput = () => {
         type: imageFile ? 'image' : 'text',
         imageUrl,
         imageHash,
-        createdAt: new Date(),
       },
       data.user?.uid
     );
+
+    if (!result.success) {
+      setDuplicateWarning('Failed to send message: ' + (result.error || 'Unknown error'));
+      return;
+    }
+
     setText('');
     setImageFile(null);
   };
 
   const handleAttachClick = () => {
     fileInputRef.current.click();
-  };
-
-  const handleReactIconClick = () => {
-    navigate('/upload'); // Go to Upload.jsx for S3 logic
   };
 
   const handleFileChange = async (e) => {
@@ -105,18 +116,14 @@ const MessageInput = () => {
     <form onSubmit={handleSend} style={{ display: 'flex', gap: 8, padding: 12, background: '#fff', borderRadius: 12, boxShadow: '0 1px 4px rgba(44,62,80,0.04)' }}>
       <input
         value={text}
-        onChange={e => setText(e.target.value)}
+        onChange={handleTyping}
         placeholder="Type a message"
         style={{ flex: 1, padding: '10px 16px', borderRadius: 8, border: '1px solid #e0e0e0', fontSize: 16, outline: 'none' }}
         disabled={uploading}
       />
-      {/* Pin/Attach icon (Firebase Storage) */}
-      <button type="button" onClick={handleAttachClick} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center' }} title="Attach image (Firebase)" disabled={uploading}>
+      {/* Pin/Attach icon (S3) */}
+      <button type="button" onClick={handleAttachClick} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center' }} title="Attach image (S3)" disabled={uploading}>
         <img src={attachIcon} alt="Attach" style={{ width: 26, height: 26, opacity: 0.8 }} />
-      </button>
-      {/* React icon (S3) navigates to Upload.jsx */}
-      <button type="button" onClick={handleReactIconClick} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center' }} title="Go to S3 Upload" disabled={uploading}>
-        <img src={reactIcon} alt="Upload" style={{ width: 26, height: 26, opacity: 0.8 }} />
       </button>
       <input
         type="file"

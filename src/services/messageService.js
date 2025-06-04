@@ -72,12 +72,28 @@ export const messageService = {
       
       // Update conversation with last message info
       const conversationRef = doc(db, 'conversations', conversationId);
-      const conversationSnap = await getDoc(conversationRef);
-      const conversationData = conversationSnap.data();
+      let conversationSnap = await getDoc(conversationRef);
+      if (!conversationSnap.exists()) {
+        // Create the conversation if it doesn't exist
+        await setDoc(conversationRef, {
+          participants: [message.senderUid, recipientId],
+          createdAt: serverTimestamp(),
+          lastMessage: '',
+          lastMessageTime: serverTimestamp(),
+          lastMessageSender: '',
+          unreadCount: {
+            [message.senderUid]: 0,
+            [recipientId]: 0
+          }
+        });
+        conversationSnap = await getDoc(conversationRef);
+      }
+      const conversationData = conversationSnap.data() || {};
+      const unreadCount = conversationData.unreadCount || {};
       
       // Update unread count for the other participant
       const otherUserId = recipientId;
-      const currentUnreadCount = conversationData.unreadCount?.[otherUserId] || 0;
+      const currentUnreadCount = unreadCount[otherUserId] || 0;
       
       batch.update(conversationRef, {
         lastMessage: message.text,
@@ -330,6 +346,34 @@ export const messageService = {
         console.error('Error in conversation subscription:', error);
       }
     );
+  },
+
+  // Set typing status for a user in a conversation
+  async setTypingStatus(conversationId, userId, isTyping) {
+    const conversationRef = doc(db, 'conversations', conversationId);
+    const snap = await getDoc(conversationRef);
+    if (!snap.exists()) {
+      // Create the conversation doc with minimal fields
+      await setDoc(conversationRef, {
+        participants: [userId],
+        typing: { [userId]: isTyping }
+      }, { merge: true });
+    } else {
+      await updateDoc(conversationRef, {
+        [`typing.${userId}`]: isTyping
+      });
+    }
+  },
+
+  // Subscribe to typing status changes in a conversation
+  subscribeToTyping(conversationId, callback) {
+    const conversationRef = doc(db, 'conversations', conversationId);
+    return onSnapshot(conversationRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        callback(data.typing || {});
+      }
+    });
   },
 
   // async getRecentImageMessages(conversationId, limitCount = 20) {

@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useRef } from "react";
+import React, { useContext, useRef } from "react";
 import { ChatContext } from "../context/ChatContext";
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth } from '../utils/firebase';
@@ -8,10 +8,6 @@ const Message = ({ message }) => {
   const [currentUser] = useAuthState(auth);
 
   const ref = useRef();
-
-  useEffect(() => {
-    ref.current?.scrollIntoView({ behavior: "smooth" });
-  }, [message]);
 
   const isOwner = message.senderUid === currentUser.uid;
 
@@ -62,13 +58,7 @@ const Message = ({ message }) => {
         alignItems: isOwner ? 'flex-end' : 'flex-start',
       }}>
         <p style={{ margin: 0 }}>{message.text}</p>
-        {message.imageUrl && (
-          <img
-            src={message.imageUrl}
-            alt="message"
-            style={{ marginTop: 8, maxWidth: 220, borderRadius: 10, boxShadow: '0 1px 4px rgba(44,62,80,0.10)' }}
-          />
-        )}
+        {message.img && <img src={message.img} alt="" style={{ marginTop: 8, maxWidth: 220, borderRadius: 10, boxShadow: '0 1px 4px rgba(44,62,80,0.10)' }} />}
       </div>
     </div>
   );
