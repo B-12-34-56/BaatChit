@@ -4,9 +4,7 @@ import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth } from '../../utils/firebase';
 import { messageService } from '../../services/messageService';
 import attachIcon from '../../img/attach.png';
-import reactIcon from '../../img/react-1-logo-black-and-white (1).png';
-import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import { useNavigate } from 'react-router-dom';
+import { getStorage, ref, uploadBytes, getDownloadURL, listAll, getMetadata } from "firebase/storage";
 
 async function getFileHash(file) {
   const arrayBuffer = await file.arrayBuffer();
@@ -14,10 +12,52 @@ async function getFileHash(file) {
   return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-async function uploadImageToFirebase(file, userId) {
+async function checkForDuplicate(userId, fileHash) {
   const storage = getStorage();
-  const storageRef = ref(storage, `user_uploads/${userId}/${file.name}`);
-  await uploadBytes(storageRef, file);
+  const userUploadsRef = ref(storage, `user_uploads/${userId}`);
+  
+  try {
+    const listResult = await listAll(userUploadsRef);
+    
+    for (const itemRef of listResult.items) {
+      try {
+        const metadata = await getMetadata(itemRef);
+        if (metadata.customMetadata && metadata.customMetadata.fileHash === fileHash) {
+          return {
+            isDuplicate: true,
+            existingUrl: await getDownloadURL(itemRef),
+            originalName: metadata.name,
+            tag: 'duplicate'
+          };
+        }
+      } catch (err) {
+        console.error('Error checking metadata:', err);
+      }
+    }
+  } catch (err) {
+    console.error('Error listing files:', err);
+  }
+  
+  return { isDuplicate: false };
+}
+
+async function uploadImageToFirebase(file, userId, fileHash) {
+  const storage = getStorage();
+  const timestamp = Date.now();
+  const fileName = `image_${timestamp}_${file.name}`;
+  const storageRef = ref(storage, `user_uploads/${userId}/${fileName}`);
+  
+  // Add custom metadata including the file hash
+  const metadata = {
+    customMetadata: {
+      fileHash: fileHash,
+      originalName: file.name,
+      uploadTimestamp: timestamp.toString(),
+      tag: 'original'
+    }
+  };
+  
+  await uploadBytes(storageRef, file, metadata);
   return await getDownloadURL(storageRef);
 }
 
@@ -29,7 +69,6 @@ const MessageInput = () => {
   const [duplicateWarning, setDuplicateWarning] = useState('');
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef(null);
-  const navigate = useNavigate();
   const uploadTaskRef = useRef(null);
 
   useEffect(() => {
@@ -43,18 +82,31 @@ const MessageInput = () => {
   const handleSend = async (e) => {
     e.preventDefault();
     if ((!text.trim() && !imageFile) || !data.chatId) return;
+    
     let imageHash = null;
     let imageUrl = null;
+    let imageTag = null;
+    
     if (imageFile) {
       imageHash = await getFileHash(imageFile);
       setDuplicateWarning('');
       setUploading(true);
+      
       try {
-        const storage = getStorage();
-        const storageRef = ref(storage, `user_uploads/${currentUser.uid}/${imageFile.name}`);
-        uploadTaskRef.current = uploadBytes(storageRef, imageFile);
-        await uploadTaskRef.current;
-        imageUrl = await getDownloadURL(storageRef);
+        // Check for duplicates first
+        const duplicateCheck = await checkForDuplicate(currentUser.uid, imageHash);
+        
+        if (duplicateCheck.isDuplicate) {
+          // Use existing image URL for duplicate
+          imageUrl = duplicateCheck.existingUrl;
+          imageTag = 'duplicate';
+          setDuplicateWarning(`Duplicate detected! Using existing image: ${duplicateCheck.originalName} [DUPLICATE]`);
+        } else {
+          // Upload new image
+          imageUrl = await uploadImageToFirebase(imageFile, currentUser.uid, imageHash);
+          imageTag = 'original';
+          setDuplicateWarning('New image uploaded successfully! [ORIGINAL]');
+        }
       } catch (err) {
         if (err.code === 'storage/canceled') {
           console.log('Upload was canceled');
@@ -66,6 +118,7 @@ const MessageInput = () => {
       }
       setUploading(false);
     }
+    
     await messageService.sendMessage(
       data.chatId,
       {
@@ -74,24 +127,26 @@ const MessageInput = () => {
         senderPhotoURL: currentUser.photoURL,
         recipientDisplayName: data.user?.displayName,
         recipientPhotoURL: data.user?.photoURL,
-        text,
+        text: text || (imageFile ? `[Image: ${imageFile.name}]` : ''),
         type: imageFile ? 'image' : 'text',
         imageUrl,
         imageHash,
+        imageTag,
         createdAt: new Date(),
       },
       data.user?.uid
     );
     setText('');
     setImageFile(null);
+    setDuplicateWarning('');
+    // Reset the file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
   };
 
   const handleAttachClick = () => {
     fileInputRef.current.click();
-  };
-
-  const handleReactIconClick = () => {
-    navigate('/upload'); // Go to Upload.jsx for S3 logic
   };
 
   const handleFileChange = async (e) => {
@@ -114,10 +169,6 @@ const MessageInput = () => {
       <button type="button" onClick={handleAttachClick} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center' }} title="Attach image (Firebase)" disabled={uploading}>
         <img src={attachIcon} alt="Attach" style={{ width: 26, height: 26, opacity: 0.8 }} />
       </button>
-      {/* React icon (S3) navigates to Upload.jsx */}
-      <button type="button" onClick={handleReactIconClick} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center' }} title="Go to S3 Upload" disabled={uploading}>
-        <img src={reactIcon} alt="Upload" style={{ width: 26, height: 26, opacity: 0.8 }} />
-      </button>
       <input
         type="file"
         accept="image/*"
@@ -130,7 +181,7 @@ const MessageInput = () => {
         {uploading ? 'Uploading…' : 'Send'}
       </button>
       {duplicateWarning && (
-        <div style={{ color: 'red', fontWeight: 600, marginTop: 8 }}>
+        <div style={{ color: duplicateWarning.includes('[DUPLICATE]') ? '#ff9800' : '#4caf50', fontWeight: 600, marginTop: 8 }}>
           {duplicateWarning}
         </div>
       )}
@@ -143,4 +194,4 @@ const MessageInput = () => {
   );
 };
 
-export default MessageInput; 
+export default MessageInput;

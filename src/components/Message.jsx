@@ -56,8 +56,44 @@ const Message = ({ message }) => {
         flexDirection: 'column',
         alignItems: isOwner ? 'flex-end' : 'flex-start',
       }}>
-        <p style={{ margin: 0 }}>{message.text}</p>
-        {message.img && <img src={message.img} alt="" style={{ marginTop: 8, maxWidth: 220, borderRadius: 10, boxShadow: '0 1px 4px rgba(44,62,80,0.10)' }} />}
+        {/* Show text if it exists and it's not just an image placeholder */}
+        {message.text && !message.text.startsWith('[Image:') && (
+          <p style={{ margin: 0 }}>{message.text}</p>
+        )}
+        
+        {/* Handle new image format with imageUrl */}
+        {message.type === 'image' && message.imageUrl && (
+          <div style={{ marginTop: message.text && !message.text.startsWith('[Image:') ? 8 : 0 }}>
+            <img 
+              src={message.imageUrl} 
+              alt={message.imageName || "Shared image"}
+              style={{ 
+                maxWidth: 220, 
+                borderRadius: 10, 
+                boxShadow: '0 1px 4px rgba(44,62,80,0.10)',
+                cursor: 'pointer'
+              }}
+              onClick={() => window.open(message.imageUrl, '_blank')}
+            />
+            {message.imageTag && (
+              <div style={{ 
+                marginTop: 4,
+                fontSize: 11,
+                fontWeight: 600,
+                color: message.imageTag === 'duplicate' ? '#ff9800' : '#4caf50',
+                textAlign: 'center',
+                textTransform: 'uppercase'
+              }}>
+                [{message.imageTag}]
+              </div>
+            )}
+          </div>
+        )}
+        
+        {/* Support old format if any messages still use it */}
+        {message.img && !message.imageUrl && (
+          <img src={message.img} alt="" style={{ marginTop: 8, maxWidth: 220, borderRadius: 10, boxShadow: '0 1px 4px rgba(44,62,80,0.10)' }} />
+        )}
       </div>
     </div>
   );
