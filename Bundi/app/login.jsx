@@ -17,21 +17,15 @@ import { router } from 'expo-router';
 import { 
   signInWithEmailAndPassword, 
   sendPasswordResetEmail,
-  GoogleAuthProvider,
-  signInWithCredential,
   onAuthStateChanged
 } from "firebase/auth";
 import { doc, updateDoc } from "firebase/firestore";
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Google from 'expo-auth-session/providers/google';
-import * as WebBrowser from 'expo-web-browser';
 // Import Firebase services directly
 import { auth, db } from '../src/utils/firebase';
 
-// Complete the web browser auth session
-WebBrowser.maybeCompleteAuthSession();
 
 const Login = () => {
   const [err, setErr] = useState(false);
@@ -46,15 +40,6 @@ const Login = () => {
   });
   const [user, setUser] = useState(null);
 
-  // Configure Google Sign-In
-  const [request, response, promptAsync] = Google.useIdTokenAuthRequest({
-    clientId: 'YOUR_GOOGLE_WEB_CLIENT_ID.apps.googleusercontent.com', // Replace with your actual client ID
-    // Add this for iOS
-    iosClientId: 'YOUR_GOOGLE_IOS_CLIENT_ID.apps.googleusercontent.com', // Replace with your iOS client ID
-    // Add this for Android
-    androidClientId: 'YOUR_GOOGLE_ANDROID_CLIENT_ID.apps.googleusercontent.com', // Replace with your Android client ID
-  });
-
   // Handle auth state changes
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -66,30 +51,6 @@ const Login = () => {
 
     return () => unsubscribe();
   }, []);
-
-  // Handle Google Sign-In response
-  useEffect(() => {
-    if (response?.type === 'success') {
-      const { id_token } = response.params;
-      const credential = GoogleAuthProvider.credential(id_token);
-      
-      signInWithCredential(auth, credential)
-        .then(async (result) => {
-          // Update user online status
-          await updateDoc(doc(db, "users", result.user.uid), {
-            isOnline: true,
-            lastActive: new Date()
-          });
-          
-          Alert.alert("Success", "Welcome!");
-          router.replace('/home');
-        })
-        .catch((error) => {
-          Alert.alert("Error", "Google sign-in failed");
-          console.error(error);
-        });
-    }
-  }, [response]);
 
   // Check remember me on component mount
   useEffect(() => {
@@ -353,29 +314,7 @@ const Login = () => {
               Welcome back
             </Text>
             
-            <TouchableOpacity
-              disabled={!request}
-              onPress={() => promptAsync()}
-              style={{
-                padding: 12,
-                backgroundColor: '#4285F4',
-                borderRadius: 8,
-                marginBottom: 16,
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'center',
-                opacity: request ? 1 : 0.6,
-              }}
-            >
-              <Ionicons name="logo-google" size={20} color="white" style={{ marginRight: 8 }} />
-              <Text style={{
-                color: 'white',
-                fontSize: 16,
-                fontWeight: '600',
-              }}>
-                Sign in with Google
-              </Text>
-            </TouchableOpacity>
+            
             
             <TextInput
               placeholder="Email"
@@ -427,13 +366,8 @@ const Login = () => {
               </TouchableOpacity>
             </View>
             
-            <View style={{
-              flexDirection: 'row',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              marginBottom: 16,
-            }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <View style={{ marginBottom: 16 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
                 <Switch
                   value={rememberMe}
                   onValueChange={setRememberMe}
