@@ -8,11 +8,11 @@ import { auth } from '../utils/firebase';
 const Message = ({ message }) => {
   const { data } = useContext(ChatContext);
   const [currentUser] = useAuthState(auth);
-  const isOwner = message.senderUid === currentUser.uid;
+  const isOwner = currentUser && message.senderUid === currentUser.uid;
   
   const defaultAvatar = 'https://ui-avatars.com/api/?name=User&background=667eea&color=fff&bold=true';
   const avatarUrl = isOwner
-    ? (currentUser.photoURL || defaultAvatar)
+    ? (currentUser?.photoURL || defaultAvatar)
     : (data.user?.photoURL || defaultAvatar);
 
   const handleImagePress = (imageUrl) => {
