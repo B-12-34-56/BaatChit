@@ -1,0 +1,8 @@
+{
+  "projects": {
+    "default": "messagingapp-cc6ec",
+    "prod": "messagingapp-cc6ec"
+  },
+  "targets": {},
+  "etags": {}
+}
