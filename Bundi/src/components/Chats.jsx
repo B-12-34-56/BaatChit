@@ -1,16 +1,31 @@
 import React, { useContext } from "react";
 import { View, StyleSheet } from "react-native";
 import { ChatContext } from "../context/ChatContext";
-import ConversationList from '../conversation/ConversationList';
+import ConversationList from './chat/ConversationList';
 import Chat from './Chat';
 
 const Chats = () => {
-  const { dispatch } = useContext(ChatContext);
+  const context = useContext(ChatContext);
+  const dispatch = context?.dispatch || (() => {});
 
   // Handler for selecting a conversation
   const handleSelectConversation = (conversation) => {
-    // conversation.otherUser should be the user object for the other participant
-    dispatch({ type: 'CHANGE_USER', payload: conversation.otherUser });
+    if (!conversation?.otherUser) {
+      console.warn('No otherUser in conversation:', conversation);
+      return;
+    }
+    
+    // Ensure all values are properly typed
+    const payload = {
+      ...conversation.otherUser,
+      uid: String(conversation.otherUser.uid || ''),
+      displayName: String(conversation.otherUser.displayName || 'User'),
+      photoURL: conversation.otherUser.photoURL || null,
+      email: conversation.otherUser.email || null
+    };
+    
+    console.log('Dispatching CHANGE_USER with payload:', payload);
+    dispatch({ type: 'CHANGE_USER', payload });
   };
 
   return (

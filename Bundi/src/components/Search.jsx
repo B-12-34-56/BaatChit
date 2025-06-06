@@ -124,7 +124,7 @@ const Search = () => {
       }}
     >
       <Image 
-        source={{ uri: item.photoURL }} 
+        source={{ uri: item.photoURL || 'https://ui-avatars.com/api/?name=' + (item.displayName || 'User') }} 
         style={{ 
           width: 36, 
           height: 36, 

@@ -10,7 +10,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Navbar from './Navbar';
 import Search from './Search';
 import Chats from './Chats';
-import FriendRequestsDropdown from '../friends/FriendRequests';
+import FriendRequestsDropdown from './friends/FriendRequests';
 
 const Sidebar = () => {
   const { dispatch } = useContext(ChatContext);
@@ -51,7 +51,7 @@ const Sidebar = () => {
       }}
     >
       <Image 
-        source={{ uri: item.photoURL }} 
+        source={{ uri: item.photoURL || 'https://ui-avatars.com/api/?name=' + (item.displayName || 'User') }} 
         style={{ 
           width: 28, 
           height: 28, 
