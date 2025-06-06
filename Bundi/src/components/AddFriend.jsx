@@ -1,4 +1,4 @@
-// AddFriend.js - React Native conversion of AddFriend.jsx
+
 import React, { useState, useContext } from "react";
 import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet } from "react-native";
 import { collection, query, where, getDocs } from "firebase/firestore";

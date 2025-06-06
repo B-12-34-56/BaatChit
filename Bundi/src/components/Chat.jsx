@@ -1,4 +1,4 @@
-// Chat.js - React Native conversion of Chat.jsx
+
 import React, { useContext, useState } from 'react'
 import { View, Text, TouchableOpacity, Modal, StyleSheet, SafeAreaView } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
@@ -190,4 +190,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default Chat
+export default Chat;
