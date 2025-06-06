@@ -1,4 +1,4 @@
-// Chats.js - React Native conversion of Chats.jsx
+
 import React, { useContext } from "react";
 import { View, StyleSheet } from "react-native";
 import { ChatContext } from "../context/ChatContext";
