@@ -125,6 +125,13 @@ const MessageInput = () => {
 
         if (!result.canceled && result.assets && result.assets[0]) {
           const asset = result.assets[0];
+          
+          // Check file size (10MB limit in your storage rules)
+          if (asset.fileSize && asset.fileSize > 10 * 1024 * 1024) {
+            Alert.alert('Image Too Large', 'Please select an image smaller than 10MB');
+            return;
+          }
+          
           setImageUri(asset.uri);
           setImageFileInfo({
             uri: asset.uri,
@@ -133,6 +140,7 @@ const MessageInput = () => {
           });
           setDuplicateWarning('');
           console.log('Image selected:', asset.uri);
+          console.log('File size:', asset.fileSize ? `${(asset.fileSize / 1024 / 1024).toFixed(2)}MB` : 'unknown');
         }
       } catch (error) {
         console.error('Error picking image:', error);
@@ -141,25 +149,56 @@ const MessageInput = () => {
     };
 
     const uploadImageToFirebase = async (imageUri, userId, fileHash) => {
-      const storage = getStorage();
-      const timestamp = Date.now();
-      const fileName = `image_${timestamp}.jpg`;
-      const storageRef = ref(storage, `user_uploads/${userId}/${fileName}`);
-      
-      const response = await fetch(imageUri);
-      const blob = await response.blob();
-      
-      const metadata = {
-        customMetadata: {
-          fileHash: String(fileHash),
-          originalName: String(fileName),
-          uploadTimestamp: String(timestamp),
-          tag: 'original'
+      try {
+        const storage = getStorage();
+        const timestamp = Date.now();
+        const fileName = `image_${timestamp}.jpg`;
+        const storageRef = ref(storage, `user_uploads/${userId}/${fileName}`);
+        
+        console.log('Fetching image from URI:', imageUri);
+        const response = await fetch(imageUri);
+        
+        if (!response.ok) {
+          throw new Error(`Failed to fetch image: ${response.status} ${response.statusText}`);
         }
-      };
-      
-      await uploadBytes(storageRef, blob, metadata);
-      return await getDownloadURL(storageRef);
+        
+        const blob = await response.blob();
+        console.log('Blob created, size:', blob.size, 'type:', blob.type);
+        
+        // Check if blob is valid
+        if (!blob.size) {
+          throw new Error('Image blob is empty');
+        }
+        
+        const metadata = {
+          contentType: blob.type || 'image/jpeg',
+          customMetadata: {
+            fileHash: String(fileHash),
+            originalName: String(fileName),
+            uploadTimestamp: String(timestamp),
+            tag: 'original'
+          }
+        };
+        
+        console.log('Uploading to path:', `user_uploads/${userId}/${fileName}`);
+        console.log('Metadata:', metadata);
+        
+        const uploadTask = await uploadBytes(storageRef, blob, metadata);
+        console.log('Upload complete:', uploadTask);
+        
+        const downloadURL = await getDownloadURL(storageRef);
+        console.log('Download URL obtained:', downloadURL);
+        
+        return downloadURL;
+      } catch (error) {
+        console.error('Firebase upload error details:', {
+          code: error.code,
+          message: error.message,
+          serverResponse: error.serverResponse,
+          customData: error.customData
+        });
+        throw error;
+      }
     };
 
     const handleSend = async () => {
@@ -175,6 +214,16 @@ const MessageInput = () => {
       if (imageUri) {
         setUploading(true);
         try {
+          // Debug: Check current user
+          console.log('Current user before upload:', {
+            uid: currentUser?.uid,
+            email: currentUser?.email,
+            displayName: currentUser?.displayName
+          });
+          
+          // Debug: Check file info
+          console.log('Image file info:', imageFileInfo);
+          
           console.log('Generating image hash...');
           imageHash = await getFileHash(imageUri);
           console.log('Image hash:', imageHash);
@@ -219,7 +268,28 @@ const MessageInput = () => {
           
         } catch (error) {
           console.error('Image upload failed:', error);
-          Alert.alert('Upload failed', 'Could not upload image. Please try again.');
+          console.error('Full error details:', {
+            name: error.name,
+            code: error.code,
+            message: error.message,
+            stack: error.stack
+          });
+          
+          // Provide more specific error messages
+          let errorMessage = 'Could not upload image. ';
+          if (error.code === 'storage/unauthorized') {
+            errorMessage += 'Permission denied. Please check Firebase Storage rules.';
+          } else if (error.code === 'storage/quota-exceeded') {
+            errorMessage += 'Storage quota exceeded.';
+          } else if (error.code === 'storage/unauthenticated') {
+            errorMessage += 'You must be logged in to upload images.';
+          } else if (error.message.includes('fetch')) {
+            errorMessage += 'Failed to process the image file.';
+          } else {
+            errorMessage += error.message || 'Please try again.';
+          }
+          
+          Alert.alert('Upload Failed', errorMessage);
           setUploading(false);
           return;
         }
