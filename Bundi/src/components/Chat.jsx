@@ -1,25 +1,27 @@
-
 import React, { useContext, useState } from 'react'
 import { View, Text, TouchableOpacity, Modal, StyleSheet, SafeAreaView } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import MessageList from './chat/MessageList'
 import MessageInput from './chat/MessageInput'
 import { ChatContext } from '../context/ChatContext'
-import { useNavigation } from '@react-navigation/native'
+import { useRouter } from 'expo-router'
 import { signOut } from 'firebase/auth'
 import { auth } from '../utils/firebase'
 import AddFriend from './AddFriend'
 
 const Chat = () => {
-  const {data} = useContext(ChatContext);
+  // Safe context access with fallback
+  const context = useContext(ChatContext);
+  const data = context?.data || { user: {}, chatId: null };
+  
   const [menuOpen, setMenuOpen] = useState(false);
   const [addFriendOpen, setAddFriendOpen] = useState(false);
-  const navigation = useNavigation();
+  const router = useRouter();
 
   const handleMenuClick = () => setMenuOpen((open) => !open);
   const handleProfile = () => { 
     setMenuOpen(false); 
-    navigation.navigate('Profile'); 
+    router.push('/profile'); 
   };
   const handleLogout = () => { 
     setMenuOpen(false); 
@@ -28,10 +30,13 @@ const Chat = () => {
   const handleAddFriend = () => setAddFriendOpen(true);
   const closeAddFriend = () => setAddFriendOpen(false);
 
+  // Safe access to displayName
+  const displayName = data?.user?.displayName || 'Chat';
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>{data.user.displayName}</Text>
+        <Text style={styles.headerTitle}>{displayName}</Text>
         <View style={styles.headerActions}>
           <TouchableOpacity onPress={() => {}}>
             <Ionicons name="videocam" size={22} color="#667eea" />

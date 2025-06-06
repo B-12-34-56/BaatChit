@@ -10,11 +10,13 @@ const Message = ({ message }) => {
   const [currentUser] = useAuthState(auth);
   const isOwner = message.senderUid === currentUser.uid;
   
+  const defaultAvatar = 'https://ui-avatars.com/api/?name=User&background=667eea&color=fff&bold=true';
   const avatarUrl = isOwner
-    ? (currentUser.photoURL || 'https://ui-avatars.com/api/?name=You&background=667eea&color=fff&bold=true')
-    : (data.user.photoURL || 'https://ui-avatars.com/api/?name=User&background=667eea&color=fff&bold=true');
+    ? (currentUser.photoURL || defaultAvatar)
+    : (data.user?.photoURL || defaultAvatar);
 
   const handleImagePress = (imageUrl) => {
+    if (!imageUrl) return;
     Linking.openURL(imageUrl);
   };
 

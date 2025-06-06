@@ -15,7 +15,7 @@ import {
   limit,
   setDoc
 } from 'firebase/firestore';
-import { db } from '../config/firebase'; // Updated import path for React Native structure
+import { db } from '../utils/firebase';
 
 export const messageService = {
   // Create or get existing conversation between two users
