@@ -10,7 +10,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Navbar from './Navbar';
 import Search from './Search';
 import Chats from './Chats';
-import FriendRequestsDropdown from './FriendRequestsDropdown';
+import FriendRequestsDropdown from '../friends/FriendRequests';
 
 const Sidebar = () => {
   const { dispatch } = useContext(ChatContext);

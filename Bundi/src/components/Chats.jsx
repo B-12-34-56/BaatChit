@@ -1,8 +1,8 @@
-
 import React, { useContext } from "react";
 import { View, StyleSheet } from "react-native";
 import { ChatContext } from "../context/ChatContext";
-import ConversationList from './chat/ConversationList';
+import ConversationList from '../conversation/ConversationList';
+import Chat from './Chat';
 
 const Chats = () => {
   const { dispatch } = useContext(ChatContext);
