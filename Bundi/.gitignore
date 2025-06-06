@@ -1,0 +1,76 @@
+# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+
+# dependencies
+node_modules/
+/.pnp
+.pnp.js
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Metro
+.metro-health-check*
+
+# testing
+/coverage
+
+# production
+/build
+
+# debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+*.log
+
+# macOS
+.DS_Store
+*.pem
+
+# local env files
+.env*.local
+.env
+.env.development.local
+.env.test.local
+.env.production.local
+
+# typescript
+*.tsbuildinfo
+
+# Firebase
+.firebase/
+firestore.indexes.json
+firestore.rules.bak
+functions/node_modules/
+functions/lib/
+functions/.env
+functions/.runtimeconfig.json
+serviceAccountKey.json
+
+# VSCode settings
+.vscode/
+
+# linting and formatting
+.eslintcache
+.prettier*
+
+# jest
+/jest.config.js
+/coverage/
+
+# Ignore Firebase credentials
+src/utils/firebase.js
+
+app-example
