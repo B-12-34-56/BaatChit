@@ -91,13 +91,39 @@ export const uploadFileToS3 = async (presignedUrl, file) => {
  * @returns {Promise<string>} The S3 URL if successful
  */
 export const uploadFileToS3WithFormData = async (presignedUrl, file) => {
+  // Validate input parameters
+  if (!presignedUrl || typeof presignedUrl !== 'string') {
+    throw new Error('Invalid presigned URL provided');
+  }
+  if (!file || typeof file !== 'object') {
+    throw new Error('Invalid file object provided');
+  }
+  if (!file.uri || typeof file.uri !== 'string') {
+    throw new Error('Invalid file URI provided');
+  }
+
   try {
     const formData = new FormData();
-    formData.append('file', {
+    
+    // Validate file properties before appending
+    const fileData = {
       uri: file.uri,
       type: file.type || 'application/octet-stream',
       name: file.name || 'upload',
-    });
+    };
+
+    // Additional validation for file data
+    if (!fileData.uri || typeof fileData.uri !== 'string') {
+      throw new Error('Invalid file URI in FormData');
+    }
+    if (!fileData.type || typeof fileData.type !== 'string') {
+      throw new Error('Invalid file type in FormData');
+    }
+    if (!fileData.name || typeof fileData.name !== 'string') {
+      throw new Error('Invalid file name in FormData');
+    }
+
+    formData.append('file', fileData);
 
     const response = await fetch(presignedUrl, {
       method: 'PUT',

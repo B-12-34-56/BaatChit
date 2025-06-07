@@ -11,11 +11,11 @@ import {
   Platform
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import * as Crypto from 'expo-crypto';
 import { ChatContext } from '../../context/ChatContext';
 import { messageService } from '../../services/messageService';
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { getFirestore, doc, getDoc, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
+import { generatePerceptualHash, generateDimensionKey } from '../../utils/imageHash';
 
 const MessageInput = () => {
   console.log('MessageInput rendering...');
@@ -29,50 +29,38 @@ const MessageInput = () => {
     const [uploading, setUploading] = useState(false);
     const [duplicateWarning, setDuplicateWarning] = useState('');
 
-    // Generate hash from actual file content
-    const getFileHash = async (uri) => {
-      try {
-        // Fetch the file as base64
-        const response = await fetch(uri);
-        const blob = await response.blob();
-        
-        // Convert blob to base64
-        const reader = new FileReader();
-        const base64Promise = new Promise((resolve, reject) => {
-          reader.onloadend = () => {
-            const base64String = reader.result.split(',')[1]; // Remove data:image/... prefix
-            resolve(base64String);
-          };
-          reader.onerror = reject;
-        });
-        reader.readAsDataURL(blob);
-        const base64Data = await base64Promise;
-        
-        // Generate hash from base64 content
-        const hash = await Crypto.digestStringAsync(
-          Crypto.CryptoDigestAlgorithm.SHA256,
-          base64Data,
-          { encoding: Crypto.CryptoEncoding.HEX }
-        );
-        
-        console.log('Generated content hash:', hash);
-        return hash;
-      } catch (error) {
-        console.error('Hash generation failed:', error);
-        // Fallback - this should rarely happen
-        return `fallback_${Date.now()}_${Math.random().toString(36)}`;
-      }
-    };
+    // Remove the old getFileHash function - we'll use the imported one
 
-    // GLOBAL duplicate and count check
-    async function getUploadLog(fileHash) {
+    // GLOBAL duplicate and count check with dimension grouping
+    async function getUploadLog(fileHash, metadata) {
       const db = getFirestore();
+      
+      // First try exact hash match
       const logRef = doc(db, "global_upload_logs", fileHash);
       const logSnap = await getDoc(logRef);
-      return logSnap.exists() ? logSnap.data() : null;
+      
+      if (logSnap.exists()) {
+        return logSnap.data();
+      }
+      
+      // If no exact match and we have dimensions, check dimension group
+      if (metadata && metadata.width && metadata.height) {
+        const dimensionKey = generateDimensionKey(metadata.width, metadata.height);
+        const dimRef = doc(db, "global_upload_dimensions", dimensionKey);
+        const dimSnap = await getDoc(dimRef);
+        
+        if (dimSnap.exists()) {
+          const dimData = dimSnap.data();
+          console.log('Found images with similar dimensions:', dimData);
+          // You could implement more sophisticated matching here
+          // For now, we'll just log it
+        }
+      }
+      
+      return null;
     }
 
-    async function incrementUploadLog(userId, userName, fileHash, fileName) {
+    async function incrementUploadLog(userId, userName, fileHash, fileName, metadata) {
       const db = getFirestore();
       const logRef = doc(db, "global_upload_logs", fileHash);
       const logSnap = await getDoc(logRef);
@@ -99,8 +87,36 @@ const MessageInput = () => {
           fileName: String(fileName),
           firstUploaderId: String(userId),
           firstUploaderName: String(userName || 'Anonymous'),
-          uploads: [uploadEntry]
+          uploads: [uploadEntry],
+          // Store metadata for better matching
+          width: metadata?.width || 0,
+          height: metadata?.height || 0,
+          perceptual: metadata?.perceptual || false
         });
+      }
+      
+      // Also update dimension index for cross-device matching
+      if (metadata && metadata.width && metadata.height) {
+        const dimensionKey = generateDimensionKey(metadata.width, metadata.height);
+        const dimRef = doc(db, "global_upload_dimensions", dimensionKey);
+        const dimSnap = await getDoc(dimRef);
+        
+        if (dimSnap.exists()) {
+          const currentHashes = dimSnap.data().hashes || [];
+          if (!currentHashes.includes(fileHash)) {
+            await updateDoc(dimRef, {
+              hashes: [...currentHashes, fileHash],
+              lastUpdated: serverTimestamp()
+            });
+          }
+        } else {
+          await setDoc(dimRef, {
+            width: metadata.width,
+            height: metadata.height,
+            hashes: [fileHash],
+            lastUpdated: serverTimestamp()
+          });
+        }
       }
     }
 
@@ -115,7 +131,7 @@ const MessageInput = () => {
 
         console.log('Opening image picker...');
         const result = await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ['images'], // Use lowercase 'images' directly
+          mediaTypes: ['images'],
           allowsEditing: true,
           aspect: [4, 3],
           quality: 0.8,
@@ -126,6 +142,12 @@ const MessageInput = () => {
         if (!result.canceled && result.assets && result.assets[0]) {
           const asset = result.assets[0];
           
+          // Validate asset has required properties
+          if (!asset.uri || typeof asset.uri !== 'string') {
+            Alert.alert('Error', 'Invalid image selected');
+            return;
+          }
+          
           // Check file size (10MB limit in your storage rules)
           if (asset.fileSize && asset.fileSize > 10 * 1024 * 1024) {
             Alert.alert('Image Too Large', 'Please select an image smaller than 10MB');
@@ -133,13 +155,10 @@ const MessageInput = () => {
           }
           
           setImageUri(asset.uri);
-          setImageFileInfo({
-            uri: asset.uri,
-            fileName: asset.fileName || `image_${Date.now()}.jpg`,
-            fileSize: asset.fileSize || 0
-          });
+          setImageFileInfo(asset); // Store the full asset object
           setDuplicateWarning('');
           console.log('Image selected:', asset.uri);
+          console.log('Image dimensions:', asset.width, 'x', asset.height);
           console.log('File size:', asset.fileSize ? `${(asset.fileSize / 1024 / 1024).toFixed(2)}MB` : 'unknown');
         }
       } catch (error) {
@@ -149,25 +168,67 @@ const MessageInput = () => {
     };
 
     const uploadImageToFirebase = async (imageUri, userId, fileHash) => {
+      // Validate input parameters
+      if (!imageUri || typeof imageUri !== 'string' || !imageUri.trim()) {
+        throw new Error('Invalid image URI provided');
+      }
+      if (!userId || typeof userId !== 'string') {
+        throw new Error('Invalid user ID provided');
+      }
+      if (!fileHash || typeof fileHash !== 'string') {
+        throw new Error('Invalid file hash provided');
+      }
+
       try {
         const storage = getStorage();
+        if (!storage) {
+          throw new Error('Firebase Storage not initialized');
+        }
+
         const timestamp = Date.now();
         const fileName = `image_${timestamp}.jpg`;
         const storageRef = ref(storage, `user_uploads/${userId}/${fileName}`);
         
         console.log('Fetching image from URI:', imageUri);
-        const response = await fetch(imageUri);
+        
+        // Add retry logic for fetch
+        const fetchWithRetry = async (uri, maxRetries = 3) => {
+          for (let i = 0; i < maxRetries; i++) {
+            try {
+              const response = await fetch(uri);
+              if (response.ok) return response;
+              throw new Error(`HTTP error! Status: ${response.status}`);
+            } catch (error) {
+              if (i === maxRetries - 1) throw error;
+              await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1))); // Exponential backoff
+            }
+          }
+          throw new Error('Failed to fetch after all retries');
+        };
+
+        const response = await fetchWithRetry(imageUri);
+        
+        if (!response) {
+          throw new Error('Failed to fetch image after all retries');
+        }
         
         if (!response.ok) {
           throw new Error(`Failed to fetch image: ${response.status} ${response.statusText}`);
         }
         
-        const blob = await response.blob();
+        let blob;
+        try {
+          blob = await response.blob();
+        } catch (blobError) {
+          console.error('Failed to create blob from response:', blobError);
+          throw new Error('Failed to process image data');
+        }
+        
         console.log('Blob created, size:', blob.size, 'type:', blob.type);
         
-        // Check if blob is valid
-        if (!blob.size) {
-          throw new Error('Image blob is empty');
+        // Validate blob
+        if (!blob || blob.size === 0) {
+          throw new Error('Invalid or empty image data');
         }
         
         const metadata = {
@@ -224,12 +285,13 @@ const MessageInput = () => {
           // Debug: Check file info
           console.log('Image file info:', imageFileInfo);
           
-          console.log('Generating image hash...');
-          imageHash = await getFileHash(imageUri);
-          console.log('Image hash:', imageHash);
+          console.log('Generating perceptual image hash...');
+          const hashResult = await generatePerceptualHash(imageUri, imageFileInfo);
+          imageHash = hashResult.hash;
+          console.log('Perceptual hash result:', hashResult);
           
           console.log('Checking for duplicates...');
-          const log = await getUploadLog(imageHash);
+          const log = await getUploadLog(imageHash, hashResult);
           console.log('Duplicate check result:', log);
           
           if (log && log.count >= 2) {
@@ -262,7 +324,8 @@ const MessageInput = () => {
             currentUser.uid,
             currentUser.displayName || currentUser.email,
             imageHash,
-            imageFileInfo?.fileName || 'image.jpg'
+            imageFileInfo?.fileName || 'image.jpg',
+            hashResult
           );
           console.log('Global log updated');
           
@@ -285,6 +348,8 @@ const MessageInput = () => {
             errorMessage += 'You must be logged in to upload images.';
           } else if (error.message.includes('fetch')) {
             errorMessage += 'Failed to process the image file.';
+          } else if (error.message.includes('perceptual hash')) {
+            errorMessage += 'Failed to process image for duplicate detection.';
           } else {
             errorMessage += error.message || 'Please try again.';
           }
