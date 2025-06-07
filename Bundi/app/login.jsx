@@ -189,7 +189,7 @@ const Login = () => {
               textAlign: 'center',
               marginBottom: 8,
             }}>
-              BaatChit
+              Bundi/Kitab
             </Text>
             <Text style={{ 
               fontSize: 20, 
@@ -303,7 +303,7 @@ const Login = () => {
               textAlign: 'center',
               marginBottom: 8,
             }}>
-              BaatChit
+              Bundi/Kitab
             </Text>
             <Text style={{ 
               fontSize: 16, 

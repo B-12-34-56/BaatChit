@@ -1,20 +1,21 @@
 {
   "expo": {
-    "name": "baatchit-mobile",
-    "slug": "baatchit-mobile",
+    "name": "bundikitab",
+    "slug": "bundikitab",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "baatchitmobile",
+    "scheme": "bundikitab",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.baatchit.mobile",
+      "bundleIdentifier": "com.bundikitab.mobile",
       "infoPlist": {
-        "NSCameraUsageDescription": "Allow BaatChit to access your camera to take photos and videos",
-        "NSPhotoLibraryUsageDescription": "Allow BaatChit to access your photos to upload images",
-        "NSMicrophoneUsageDescription": "Allow BaatChit to access your microphone for video messages"
+        "NSCameraUsageDescription": "Allow Bundi/Kitab to access your camera to take photos and videos",
+        "NSPhotoLibraryUsageDescription": "Allow Bundi/Kitab to access your photos to upload images",
+        "NSMicrophoneUsageDescription": "Allow Bundi/Kitab to access your microphone for video messages",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -23,12 +24,12 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.baatchit.mobile",
+      "package": "com.bundikitab.mobile",
       "permissions": [
-        "CAMERA",
-        "READ_EXTERNAL_STORAGE",
-        "WRITE_EXTERNAL_STORAGE",
-        "RECORD_AUDIO"
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "web": {
@@ -50,14 +51,20 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow BaatChit to access your photos to upload images",
-          "cameraPermission": "Allow BaatChit to access your camera to take photos and videos"
+          "photosPermission": "Allow Bundi/Kitab to access your photos to upload images",
+          "cameraPermission": "Allow Bundi/Kitab to access your camera to take photos and videos"
         }
       ],
       "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "4dbc1c92-1eb4-43ce-baa2-4542d002b8ae"
+      }
     }
   }
 }
