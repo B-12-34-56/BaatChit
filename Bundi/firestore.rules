@@ -44,5 +44,10 @@ service cloud.firestore {
     match /global_upload_logs/{fileHash} {
       allow read, write: if request.auth != null;
     }
+    
+    // NEW: Allow authenticated users to read and write documents in the global_upload_dimensions collection
+    match /global_upload_dimensions/{dimensionKey} {
+      allow read, write: if request.auth != null;
+    }
   }
 }
