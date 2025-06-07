@@ -1,1 +1,0 @@
-// This file is no longer needed. Please use useAuthState(auth) from 'react-firebase-hooks/auth' directly in your components.
