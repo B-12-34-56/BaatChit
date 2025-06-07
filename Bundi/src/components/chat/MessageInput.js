@@ -239,7 +239,7 @@ const MessageInput = () => {
             setUploading(false);
             
             Alert.alert(
-              'Duplicate Image', 
+              'Blocked', 
               `This image has already been uploaded twice and cannot be uploaded again.`,
               [{ text: 'OK' }]
             );
