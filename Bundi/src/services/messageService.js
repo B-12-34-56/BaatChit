@@ -23,7 +23,7 @@ export const messageService = {
     try {
       // Sort IDs to ensure consistent conversation ID
       const sortedIds = [user1Id, user2Id].sort();
-      const conversationId = `${sortedIds[0]}_${sortedIds[1]}`;
+      const conversationId = `${sortedIds[0]}${sortedIds[1]}`;
       
       const conversationRef = doc(db, 'conversations', conversationId);
       const conversationSnap = await getDoc(conversationRef);
