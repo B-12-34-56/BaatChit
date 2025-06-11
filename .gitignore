@@ -19,8 +19,6 @@
 
 # Firebase emulators and local state
 .firebase/
-firestore.indexes.json
-firestore.rules.bak
 
 # Functions build and logs
 functions/node_modules/
@@ -45,7 +43,5 @@ yarn-error.log*
 /jest.config.js
 /coverage/
 
+# Sensitive credentials
 serviceAccountKey.json
-
-# Ignore Firebase credentials
-src/utils/firebase.js
