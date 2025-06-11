@@ -1,0 +1,29 @@
+{
+  "rules": {
+    "users": {
+      "$uid": {
+        ".read":  "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid"
+      }
+    },
+    "userChats": {
+      "$chatId": {
+        ".read": "auth != null && root.child('userChats').child($chatId).child('participants').child(auth.uid).exists()",
+        ".write": "auth != null && ((!data.exists() && newData.child('participants').child(auth.uid).val() === true) || (data.exists() && root.child('userChats').child($chatId).child('participants').child(auth.uid).exists()))",
+        "participants": {
+          "$memberUid": {
+            ".write": "auth != null && auth.uid === $memberUid",
+            ".read":  "auth != null && root.child('userChats').child($chatId).child('participants').child(auth.uid).exists()"
+          }
+        },
+        "messages": {
+          "$messageId": {
+            ".read": "auth != null && root.child('userChats').child($chatId).child('participants').child(auth.uid).exists()",
+            ".write": "auth != null && root.child('userChats').child($chatId).child('participants').child(auth.uid).exists() && !data.exists() && newData.child('senderUid').val() === auth.uid",
+            ".validate": "!data.exists()"
+          }
+        }
+      }
+    }
+  }
+} 

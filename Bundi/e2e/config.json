@@ -1,0 +1,9 @@
+{
+  "testEnvironment": "node",
+  "testRunner": "jest-circus/runner",
+  "testTimeout": 120000,
+  "reporters": ["detox/runners/jest/streamlineReporter"],
+  "verbose": true,
+  "bail": false,
+  "setupFilesAfterEnv": ["./e2e/setup.ts"]
+} 

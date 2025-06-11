@@ -1,0 +1,94 @@
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+
+# testing
+/coverage
+
+# production
+/build
+
+# misc
+.DS_Store
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env
+
+# Firebase emulators and local state
+.firebase/
+firestore.indexes.json
+firestore.rules.bak
+
+# Functions build and logs
+functions/node_modules/
+functions/lib/
+functions/.env
+functions/.runtimeconfig.json
+
+# General logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# VSCode settings
+.vscode/
+
+# linting and formatting
+.eslintcache
+.prettier*
+
+# jest
+/jest.config.js
+/coverage/
+
+# Firebase and Twilio credentials
+serviceAccountKey.json
+src/utils/firebase.js
+src/services/twilio.js
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+
+# Firebase
+firebase-debug.log
+.firebase/
+firebase-debug.*.log
+
+# Node
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+build/
+dist/
+*.log
+
+# Firebase/Google service accounts
+service-account.json
+functions/service-account.json
+serviceAccountKey.json
+# Firebase config for mobile
+GoogleService-Info.plist
+google-services.json
+
+# Twilio credentials
+twilio-credentials.json
+twilio.env

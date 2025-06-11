@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+  FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
+  FIREBASE_AUTH_DOMAIN: ${{ secrets.FIREBASE_AUTH_DOMAIN }}
+  FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
+  FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}
+  FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
+  FIREBASE_MEASUREMENT_ID: ${{ secrets.FIREBASE_MEASUREMENT_ID }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Use Node.js 18
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+          cache: 'npm'
+
+      - name: Cache Firebase Config
+        uses: actions/cache@v3
+        with:
+          path: |
+            android/app/google-services.json
+            ios/GoogleService-Info.plist
+          key: ${{ runner.os }}-firebase-config-${{ hashFiles('**/google-services.json', '**/GoogleService-Info.plist') }}
+          restore-keys: |
+            ${{ runner.os }}-firebase-config-
+
+      - name: Install dependencies
+        run: |
+          cd Bundi
+          yarn install
+
+      - name: Lint
+        run: |
+          cd Bundi
+          yarn lint
+
+      - name: Test OTP Flow
+        run: |
+          cd Bundi
+          yarn test:otp
+        env:
+          CI: true
+
+      - name: Build
+        run: |
+          cd Bundi
+          yarn build
+
+      - name: Upload Firebase Config
+        uses: actions/upload-artifact@v3
+        with:
+          name: firebase-config
+          path: |
+            android/app/google-services.json
+            ios/GoogleService-Info.plist
+          retention-days: 7 
