@@ -5,8 +5,6 @@ import MessageList from './chat/MessageList'
 import MessageInput from './chat/MessageInput'
 import { ChatContext } from '../context/ChatContext'
 import { useRouter } from 'expo-router'
-import { signOut } from 'firebase/auth'
-import { auth } from '../utils/firebase'
 import AddFriend from './AddFriend'
 
 const Chat = () => {
@@ -22,10 +20,6 @@ const Chat = () => {
   const handleProfile = () => { 
     setMenuOpen(false); 
     router.push('/profile'); 
-  };
-  const handleLogout = () => { 
-    setMenuOpen(false); 
-    signOut(auth); 
   };
   const handleAddFriend = () => setAddFriendOpen(true);
   const closeAddFriend = () => setAddFriendOpen(false);
@@ -66,12 +60,6 @@ const Chat = () => {
                 onPress={handleProfile}
               >
                 <Text style={styles.menuItemText}>Profile</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={styles.menuItem}
-                onPress={handleLogout}
-              >
-                <Text style={[styles.menuItemText, { color: '#e53e3e' }]}>Logout</Text>
               </TouchableOpacity>
             </View>
           </TouchableOpacity>
