@@ -34,8 +34,9 @@ function log(level, message, data = null) {
 admin.initializeApp();
 
 // Enhanced similarity detection with better thresholds
-async function findSimilarImages(db, hashData, fileHash, threshold = 300) {
+async function findSimilarImages(db, hashData, fileHash, threshold = 25) {
   const similarImages = [];
+  let firstComparison = true;
   
   try {
     // First, try to find exact matches
@@ -84,28 +85,47 @@ async function findSimilarImages(db, hashData, fileHash, threshold = 300) {
           const otherHashData = doc.data();
           
           // Compare using robust hash comparison
-          const distance = compareHashes(hashData, otherHashData, threshold);
+          const comparison = compareHashes(hashData, otherHashData, threshold);
           
-          // Log comparison details for debugging
-          if (processedCount === 0 || distance <= threshold * 1.5) { // Log first comparison and near-matches
-            console.log(`Comparing with ${doc.id}:`, {
-              distance,
-              threshold,
-              isMatch: distance <= threshold,
-              ourHash: hashData.perceptualHash?.substring(0, 32),
-              theirHash: otherHashData.perceptualHash?.substring(0, 32)
-            });
+          // Enhanced detailed logging for comparisons
+          if (firstComparison || comparison.distance <= threshold * 2) {
+            console.log(`\n🔬 Detailed comparison with ${doc.id}:`);
+            console.log(`Distance: ${comparison.distance} (threshold: ${threshold})`);
+            console.log(`Percent difference: ${(comparison.distance / 256 * 100).toFixed(1)}%`);
+            console.log(`Match: ${comparison.isSimilar ? 'YES ✅' : 'NO ❌'}`);
+            
+            if (firstComparison) {
+              console.log('\n📊 Hash Comparison Details:');
+              console.log('Our perceptual hash:', hashData.perceptualHash?.substring(0, 128));
+              console.log('Their perceptual hash:', otherHashData.perceptualHash?.substring(0, 128));
+              console.log('Our color hash:', hashData.colorHash);
+              console.log('Their color hash:', otherHashData.colorHash);
+              
+              // Add additional metadata comparison
+              console.log('\n📝 Metadata Comparison:');
+              console.log('File paths:');
+              console.log('- Our file:', hashData.filePath || 'unknown');
+              console.log('- Their file:', otherHashData.filePath || 'unknown');
+              console.log('Content types:');
+              console.log('- Our type:', hashData.contentType || 'unknown');
+              console.log('- Their type:', otherHashData.contentType || 'unknown');
+              console.log('File sizes:');
+              console.log('- Our size:', hashData.imageSize ? `${(hashData.imageSize / 1024).toFixed(1)}KB` : 'unknown');
+              console.log('- Their size:', otherHashData.imageSize ? `${(otherHashData.imageSize / 1024).toFixed(1)}KB` : 'unknown');
+              
+              firstComparison = false;
+            }
           }
           
-          if (distance <= threshold) {
+          if (comparison.isSimilar) {
             similarImages.push({
               originalHash: doc.id,
-              distance,
+              distance: comparison.distance,
               filePath: otherHashData.filePath || otherHashData.path || doc.data().filePath || 'unknown',
-              matchType: distance <= 20 ? 'very_similar' : 'similar'
+              matchType: comparison.distance <= 20 ? 'very_similar' : 'similar'
             });
             
-            console.log(`✅ Found similar image: ${doc.id} with distance ${distance}`);
+            console.log(`✅ Found similar image: ${doc.id} with distance ${comparison.distance}`);
           }
         }
       }
@@ -202,7 +222,7 @@ exports.processImageUpload = functions
     console.log('💾 Stored perceptual hash data');
     
     // Find similar images with adjusted threshold
-    const SIMILARITY_THRESHOLD = 300; // High threshold for iMessage compression (30% of 1024-bit hash)
+    const SIMILARITY_THRESHOLD = 5; // Much stricter - only very similar images
     const similarImages = await findSimilarImages(
       admin.firestore(), 
       hashData, 
@@ -492,4 +512,4 @@ exports.healthCheck = functions.https.onRequest((req, res) => {
     timestamp: new Date().toISOString(),
     version: '2.0.0'
   });
-});
+});// Force redeploy Wed Jun 11 23:35:54 EDT 2025
