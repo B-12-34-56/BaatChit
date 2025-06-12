@@ -21,7 +21,10 @@ const Chat = () => {
     setMenuOpen(false); 
     router.push('/profile'); 
   };
-  const handleAddFriend = () => setAddFriendOpen(true);
+  const handleAddFriend = () => {
+    setMenuOpen(false);
+    router.push('/add-friend');
+  };
   const closeAddFriend = () => setAddFriendOpen(false);
 
   // Safe access to displayName
@@ -30,73 +33,48 @@ const Chat = () => {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>{displayName}</Text>
-        <View style={styles.headerActions}>
-          <TouchableOpacity onPress={() => {}}>
-            <Ionicons name="videocam" size={22} color="#667eea" />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={handleAddFriend}>
-            <Ionicons name="person-add" size={22} color="#667eea" />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={handleMenuClick}>
-            <Ionicons name="ellipsis-vertical" size={22} color="#667eea" />
-          </TouchableOpacity>
-        </View>
-
-        {/* Menu Modal */}
-        <Modal
-          visible={menuOpen}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setMenuOpen(false)}
-        >
-          <TouchableOpacity 
-            style={styles.modalOverlay}
-            onPress={() => setMenuOpen(false)}
-          >
-            <View style={styles.menuDropdown}>
-              <TouchableOpacity 
-                style={styles.menuItem}
-                onPress={handleProfile}
-              >
-                <Text style={styles.menuItemText}>Profile</Text>
-              </TouchableOpacity>
-            </View>
-          </TouchableOpacity>
-        </Modal>
-
-        {/* Add Friend Modal */}
-        <Modal
-          visible={addFriendOpen}
-          transparent
-          animationType="slide"
-          onRequestClose={closeAddFriend}
-        >
-          <TouchableOpacity 
-            style={styles.modalOverlay}
-            onPress={closeAddFriend}
-          >
-            <View style={styles.addFriendModal}>
-              <View style={styles.addFriendHeader}>
-                <TouchableOpacity onPress={closeAddFriend}>
-                  <Text style={styles.closeButton}>×</Text>
-                </TouchableOpacity>
-              </View>
-              <AddFriend />
-            </View>
-          </TouchableOpacity>
-        </Modal>
+        <TouchableOpacity onPress={handleMenuClick} style={styles.menuButton}>
+          <Ionicons name="menu" size={24} color="#333" />
+        </TouchableOpacity>
+        <Text style={styles.title}>{displayName}</Text>
       </View>
-      
-      <View style={styles.chatContent}>
-        <View style={styles.messageListContainer}>
-          <MessageList />
-        </View>
-        <MessageInput />
-      </View>
+
+      <MessageList />
+      <MessageInput />
+
+      <Modal
+        visible={menuOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setMenuOpen(false)}
+      >
+        <TouchableOpacity 
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setMenuOpen(false)}
+        >
+          <View style={styles.menuContent}>
+            <TouchableOpacity 
+              style={styles.menuItem}
+              onPress={handleProfile}
+            >
+              <Ionicons name="person" size={24} color="#333" />
+              <Text style={styles.menuText}>Profile</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.menuItem}
+              onPress={handleAddFriend}
+            >
+              <Ionicons name="person-add" size={24} color="#333" />
+              <Text style={styles.menuText}>Add Friend</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </SafeAreaView>
-  )
-}
+  );
+};
 
 const styles = StyleSheet.create({
   container: {
@@ -106,80 +84,48 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 24,
-    paddingVertical: 18,
-    backgroundColor: 'rgba(255,255,255,0.95)',
-    borderBottomWidth: 1.5,
+    padding: 16,
+    borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
   },
-  headerTitle: {
-    fontWeight: '700',
-    fontSize: 18,
-    color: '#3a3a5a',
-    letterSpacing: 0.2,
+  menuButton: {
+    padding: 8,
   },
-  headerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 18,
+  title: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginLeft: 16,
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(44,62,80,0.18)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
-  menuDropdown: {
-    backgroundColor: 'white',
-    borderRadius: 10,
-    minWidth: 120,
-    paddingVertical: 8,
-    shadowColor: '#2c3e50',
+  menuContent: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#fff',
+    padding: 16,
+    borderBottomLeftRadius: 16,
+    borderBottomRightRadius: 16,
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.13,
-    shadowRadius: 12,
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
     elevation: 5,
   },
   menuItem: {
-    paddingHorizontal: 18,
-    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
   },
-  menuItemText: {
-    color: '#3a3a5a',
-    fontWeight: '600',
-    fontSize: 15,
-    textAlign: 'left',
-  },
-  addFriendModal: {
-    backgroundColor: 'white',
-    borderRadius: 18,
-    padding: 32,
-    minWidth: 320,
-    maxWidth: '90%',
-    shadowColor: '#2c3e50',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.18,
-    shadowRadius: 24,
-    elevation: 8,
-  },
-  addFriendHeader: {
-    position: 'absolute',
-    top: 10,
-    right: 16,
-    zIndex: 1,
-  },
-  closeButton: {
-    fontSize: 22,
-    color: '#888',
-    fontWeight: 'bold',
-  },
-  chatContent: {
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  messageListContainer: {
-    flex: 1,
+  menuText: {
+    fontSize: 16,
+    marginLeft: 16,
+    color: '#333',
   },
 });
 

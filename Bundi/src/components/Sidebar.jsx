@@ -11,7 +11,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import Navbar from './Navbar';
 import Chats from './Chats';
-import FriendRequestsDropdown from './friends/FriendRequests';
+import FriendRequestsDropdown from './FriendRequestsDropdown';
 
 const Sidebar = () => {
   const { dispatch } = useContext(ChatContext);
@@ -251,14 +251,6 @@ const Sidebar = () => {
           borderWidth: 1,
           borderColor: '#e0e0e0',
         }}>
-          <Text style={{
-            fontSize: 16,
-            fontWeight: '600',
-            color: '#333',
-            marginBottom: 8,
-          }}>
-            Friend Requests
-          </Text>
           <FriendRequestsDropdown />
         </View>
       </View>
@@ -272,88 +264,32 @@ const Sidebar = () => {
         borderBottomColor: '#e0e0e0',
         backgroundColor: 'rgba(255,255,255,0.92)',
       }}>
-        <View style={{ 
-          flexDirection: 'row', 
-          justifyContent: 'space-between', 
-          alignItems: 'center',
-          marginBottom: 8,
-        }}>
-          <Text style={{ 
-            fontWeight: '700', 
-            fontSize: 15, 
+        <TouchableOpacity
+          onPress={() => router.push('/search')}
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            backgroundColor: '#f8f9fa',
+            borderRadius: 12,
+            padding: 12,
+            borderWidth: 1,
+            borderColor: '#e0e0e0',
+          }}
+        >
+          <Ionicons name="search" size={20} color="#667eea" />
+          <Text style={{
+            marginLeft: 8,
+            fontSize: 16,
             color: '#667eea',
+            fontWeight: '600',
           }}>
-            Friends
+            Search Users
           </Text>
-          <TouchableOpacity
-            onPress={() => router.push('/search')}
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              backgroundColor: '#667eea',
-              paddingHorizontal: 12,
-              paddingVertical: 6,
-              borderRadius: 8,
-            }}
-          >
-            <Ionicons name="search" size={16} color="#fff" style={{ marginRight: 4 }} />
-            <Text style={{ 
-              color: '#fff',
-              fontSize: 13,
-              fontWeight: '600',
-            }}>
-              Search
-            </Text>
-          </TouchableOpacity>
-        </View>
-        {loading ? (
-          <View style={{ padding: 10, alignItems: 'center' }}>
-            <ActivityIndicator size="small" color="#667eea" />
-          </View>
-        ) : error ? (
-          <View style={{ padding: 10, alignItems: 'center' }}>
-            <Text style={{ color: '#ff4444', marginBottom: 10, textAlign: 'center' }}>
-              {error}
-            </Text>
-            <TouchableOpacity
-              onPress={() => {
-                setError(null);
-                setLoading(true);
-                // Re-trigger the useEffect by updating a dependency
-                setFriends([]);
-              }}
-              style={{
-                backgroundColor: '#667eea',
-                paddingHorizontal: 16,
-                paddingVertical: 8,
-                borderRadius: 8,
-              }}
-            >
-              <Text style={{ color: '#fff', fontWeight: '600' }}>
-                Try Again
-              </Text>
-            </TouchableOpacity>
-          </View>
-        ) : friends.length === 0 ? (
-          <Text style={{ fontSize: 13, color: '#aaa', textAlign: 'center', padding: 10 }}>
-            No friends yet. Use the search button to find friends!
-          </Text>
-        ) : (
-          <FlatList
-            data={friends}
-            renderItem={renderFriendItem}
-            keyExtractor={(item) => item.uid}
-            style={{ flex: 1 }}
-            showsVerticalScrollIndicator={false}
-          />
-        )}
+        </TouchableOpacity>
       </View>
 
       {/* Chats Section */}
-      <View style={{ 
-        flex: 1,
-        minHeight: 0,
-      }}>
+      <View style={{ flex: 1 }}>
         <Chats />
       </View>
     </LinearGradient>

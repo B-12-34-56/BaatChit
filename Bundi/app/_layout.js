@@ -50,6 +50,30 @@ export default function RootLayoutNav() {
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="profile" />
       <Stack.Screen name="search" />
+      <Stack.Screen 
+        name="chat" 
+        options={{
+          headerShown: true,
+          headerTitle: 'Chat',
+          headerBackTitle: 'Back'
+        }}
+      />
+      <Stack.Screen 
+        name="friend-requests" 
+        options={{
+          headerShown: true,
+          headerTitle: 'Friend Requests',
+          headerBackTitle: 'Back'
+        }}
+      />
+      <Stack.Screen 
+        name="add-friend" 
+        options={{
+          headerShown: true,
+          headerTitle: 'Add Friend',
+          headerBackTitle: 'Back'
+        }}
+      />
     </Stack>
   );
 } 

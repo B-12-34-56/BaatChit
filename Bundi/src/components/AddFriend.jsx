@@ -5,12 +5,15 @@ import { db } from "../utils/firebase";
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth } from '../utils/firebase';
 import { friendRequestService } from '../services/friendRequestService';
+import { useRouter } from 'expo-router';
+import Toast from 'react-native-toast-message';
 
 const AddFriend = () => {
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState("");
   const [currentUser] = useAuthState(auth);
   const [outgoing, setOutgoing] = useState([]);
+  const router = useRouter();
 
   const handleAddFriend = async () => {
     setStatus("");
@@ -46,6 +49,11 @@ const AddFriend = () => {
         return;
       }
       
+      Toast.show({
+        type: 'success',
+        text1: 'Friend request sent!',
+      });
+      
       setStatus("Friend request sent!");
       setEmail("");
       
@@ -54,6 +62,11 @@ const AddFriend = () => {
     } catch (err) {
       console.error('Friend request error (catch):', err);
       setStatus("Error: " + (err.message || err.toString()));
+      Toast.show({
+        type: 'error',
+        text1: 'Error sending friend request',
+        text2: err.message
+      });
     }
   };
 
@@ -76,7 +89,7 @@ const AddFriend = () => {
   );
 
   return (
-    <View>
+    <View style={styles.container}>
       <View style={styles.form}>
         <TextInput
           placeholder="Add friend by email"
@@ -117,53 +130,71 @@ const AddFriend = () => {
           />
         )}
       </View>
+      <Toast />
     </View>
   );
 };
 
 const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    padding: 16,
+  },
   form: {
-    gap: 8,
-    marginBottom: 18,
+    marginBottom: 24,
   },
   input: {
-    padding: 8,
-    borderRadius: 6,
     borderWidth: 1,
-    borderColor: '#ccc',
-    fontSize: 15,
+    borderColor: '#e0e0e0',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+    fontSize: 16,
   },
   button: {
     backgroundColor: '#667eea',
-    borderRadius: 6,
-    paddingVertical: 8,
+    padding: 12,
+    borderRadius: 8,
     alignItems: 'center',
   },
   buttonText: {
     color: 'white',
+    fontSize: 16,
     fontWeight: '600',
-    fontSize: 15,
   },
   status: {
-    fontSize: 13,
+    marginTop: 8,
+    fontSize: 14,
+    textAlign: 'center',
   },
   pendingSection: {
-    marginTop: 16,
+    flex: 1,
   },
   pendingTitle: {
+    fontSize: 18,
     fontWeight: '600',
-    fontSize: 15,
-    marginBottom: 6,
+    marginBottom: 12,
+    color: '#333',
   },
   noPending: {
-    color: '#888',
-    fontSize: 13,
+    color: '#666',
+    fontSize: 14,
+    textAlign: 'center',
+    marginTop: 24,
   },
   requestsList: {
-    maxHeight: 200,
+    flex: 1,
   },
   requestItem: {
-    marginBottom: 4,
+    padding: 12,
+    backgroundColor: 'white',
+    borderRadius: 8,
+    marginBottom: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
   },
   requestText: {
     fontSize: 14,

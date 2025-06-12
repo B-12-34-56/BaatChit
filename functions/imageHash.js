@@ -243,30 +243,67 @@ async function getColorHash(buffer) {
 
 /**
  * Enhanced similarity comparison that uses multiple hash types
+ * Returns: { distance: number, isSimilar: boolean }
  */
 function compareHashes(hash1, hash2, threshold = 15) {
-  if (!hash1 || !hash2) return 999;
+  if (!hash1 || !hash2) {
+    return { distance: 999, isSimilar: false };
+  }
+  
+  let distance = 999;
   
   // Handle both string hashes and object hashes
   if (typeof hash1 === 'string' && typeof hash2 === 'string') {
-    return hammingDistance(hash1, hash2);
+    distance = hammingDistance(hash1, hash2);
   }
-  
   // If we have robust hashes with multiple components
-  if (hash1.perceptualHash && hash2.perceptualHash) {
+  else if (hash1.perceptualHash && hash2.perceptualHash) {
     const perceptualDist = hammingDistance(hash1.perceptualHash, hash2.perceptualHash);
     
+    // Log detailed comparison
+    console.log('Hash comparison details:', {
+      hash1Preview: hash1.perceptualHash.substring(0, 64),
+      hash2Preview: hash2.perceptualHash.substring(0, 64),
+      perceptualDistance: perceptualDist,
+      hashLength: hash1.perceptualHash.length
+    });
+    
     // Check if color histograms are similar
-    let colorSimilarity = 1;
+    let colorPenalty = 1; // Default no penalty
     if (hash1.colorHash && hash2.colorHash) {
-      colorSimilarity = compareColorHashes(hash1.colorHash, hash2.colorHash);
+      const colorSimilarity = compareColorHashes(hash1.colorHash, hash2.colorHash);
+      // Convert similarity (0-1) to penalty (1-2)
+      // Similar colors = 1 (no penalty), different colors = 2 (double the distance)
+      colorPenalty = 2 - colorSimilarity;
+      
+      console.log('Color comparison:', {
+        colorHash1: hash1.colorHash,
+        colorHash2: hash2.colorHash,
+        similarity: colorSimilarity,
+        penalty: colorPenalty
+      });
     }
     
-    // Weight the different factors
-    return perceptualDist * colorSimilarity;
+    // Apply color penalty to increase distance for different colors
+    distance = Math.floor(perceptualDist * colorPenalty);
+    
+    console.log('Final distance calculation:', {
+      perceptualDistance: perceptualDist,
+      colorPenalty: colorPenalty,
+      finalDistance: distance
+    });
   }
   
-  return 999;
+  const isSimilar = distance <= threshold;
+  
+  console.log('Similarity check result:', {
+    distance: distance,
+    threshold: threshold,
+    isSimilar: isSimilar,
+    percentDifference: `${(distance / 256 * 100).toFixed(1)}%`
+  });
+  
+  return { distance, isSimilar };
 }
 
 /**
@@ -337,9 +374,18 @@ async function generateFallbackHash(buffer) {
 /**
  * Determine if two images are similar
  */
-function areSimilar(hash1, hash2, threshold = 30) {
+function areSimilar(hash1, hash2, threshold = 25) {
   const distance = compareHashes(hash1, hash2);
-  return distance <= threshold;
+  const similar = distance.distance <= threshold;
+  
+  console.log('Similarity check:', {
+    distance: distance.distance,
+    threshold: threshold,
+    isSimilar: similar,
+    percentDifference: `${(distance.distance / 256 * 100).toFixed(1)}%`
+  });
+  
+  return similar;
 }
 
 /**
@@ -376,4 +422,4 @@ module.exports = {
   hexToBinary,
   generateFallbackHash,
   hammingDistance
-};
+};// Force redeploy Wed Jun 11 23:36:01 EDT 2025

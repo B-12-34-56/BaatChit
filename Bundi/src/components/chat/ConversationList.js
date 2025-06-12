@@ -670,8 +670,8 @@ const MessageInput = () => {
             }
           ]
         );
-        return;
-      }
+      return;
+    }
 
       // Now launch the image picker with proper options
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -691,14 +691,14 @@ const MessageInput = () => {
           return;
         }
         
-        setImageUri(asset.uri);
+          setImageUri(asset.uri);
         setImageFile({
           uri: asset.uri,
           fileName: asset.fileName || `image_${Date.now()}.jpg`,
           type: asset.type || 'image/jpeg',
           fileSize: asset.fileSize || 0
         });
-        setDuplicateWarning('');
+          setDuplicateWarning('');
       }
     } catch (error) {
       console.error('Error picking image:', error);

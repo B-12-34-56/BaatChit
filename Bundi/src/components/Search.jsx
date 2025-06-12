@@ -161,111 +161,103 @@ const UserSearchComponent = () => {
   );
 
   return (
-    <KeyboardAvoidingView 
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={{ flex: 1 }}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-    >
-      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-        <View style={{ flex: 1, paddingTop: 16 }}>
-          <View style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            backgroundColor: '#f7f8fa',
-            borderRadius: 12,
-            paddingHorizontal: 12,
+    <View style={{ flex: 1, paddingTop: 16 }}>
+      <View style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#f7f8fa',
+        borderRadius: 12,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        marginHorizontal: 16,
+        marginBottom: 10,
+        shadowColor: '#2c3e50',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.06,
+        shadowRadius: 4,
+        elevation: 2,
+      }}>
+        <Ionicons name="search" size={20} color="#667eea" style={{ opacity: 0.6, marginRight: 8 }} />
+        <TextInput
+          placeholder="Search by name, phone, or email"
+          onChangeText={setUsername}
+          value={username}
+          style={{
+            flex: 1,
+            fontSize: 15,
+            fontWeight: '500',
+            color: '#222',
+            paddingVertical: 8,
+          }}
+          onSubmitEditing={handleSearch}
+          autoCapitalize="none"
+          autoCorrect={false}
+          keyboardType="default"
+          returnKeyType="search"
+        />
+        <TouchableOpacity
+          onPress={handleSearch}
+          style={{
+            backgroundColor: '#667eea',
+            paddingHorizontal: 14,
             paddingVertical: 6,
-            marginHorizontal: 16,
-            marginBottom: 10,
-            shadowColor: '#2c3e50',
-            shadowOffset: { width: 0, height: 1 },
-            shadowOpacity: 0.06,
-            shadowRadius: 4,
-            elevation: 2,
-          }}>
-            <Ionicons name="search" size={20} color="#667eea" style={{ opacity: 0.6, marginRight: 8 }} />
-            <TextInput
-              placeholder="Search by name, phone, or email"
-              onChangeText={setUsername}
-              value={username}
-              style={{
-                flex: 1,
-                fontSize: 15,
-                fontWeight: '500',
-                color: '#222',
-                paddingVertical: 8,
-              }}
-              onSubmitEditing={handleSearch}
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="default"
-              returnKeyType="search"
-            />
-            <TouchableOpacity
-              onPress={handleSearch}
-              style={{
-                backgroundColor: '#667eea',
-                paddingHorizontal: 14,
-                paddingVertical: 6,
-                borderRadius: 8,
-                marginLeft: 6,
-              }}
-              disabled={loading}
-            >
-              {loading ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Text style={{
-                  color: 'white',
-                  fontWeight: '600',
-                  fontSize: 14,
-                }}>
-                  Search
-                </Text>
-              )}
-            </TouchableOpacity>
-          </View>
-          
-          {err && (
-            <Text style={{ 
-              color: "#e53e3e", 
-              fontSize: 13, 
-              fontWeight: '500',
-              marginTop: 4,
-              marginHorizontal: 16,
+            borderRadius: 8,
+            marginLeft: 6,
+          }}
+          disabled={loading}
+        >
+          {loading ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <Text style={{
+              color: 'white',
+              fontWeight: '600',
+              fontSize: 14,
             }}>
-              No users found!
+              Search
             </Text>
           )}
-          
-          <ScrollView 
-            style={{ flex: 1 }}
-            contentContainerStyle={{ paddingHorizontal: 16 }}
-            keyboardShouldPersistTaps="handled"
-          >
-            {user && Array.isArray(user) && (
-              <FlatList
-                data={user}
-                renderItem={renderUserItem}
-                keyExtractor={(item) => item.uid}
-                showsVerticalScrollIndicator={false}
-                scrollEnabled={false}
-                ListEmptyComponent={
-                  <Text style={{ 
-                    textAlign: 'center',
-                    color: '#666',
-                    marginTop: 20,
-                    fontSize: 14
-                  }}>
-                    No users found matching your search
-                  </Text>
-                }
-              />
-            )}
-          </ScrollView>
-        </View>
-      </TouchableWithoutFeedback>
-    </KeyboardAvoidingView>
+        </TouchableOpacity>
+      </View>
+      
+      {err && (
+        <Text style={{ 
+          color: "#e53e3e", 
+          fontSize: 13, 
+          fontWeight: '500',
+          marginTop: 4,
+          marginHorizontal: 16,
+        }}>
+          No users found!
+        </Text>
+      )}
+      
+      <ScrollView 
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingHorizontal: 16 }}
+        keyboardShouldPersistTaps="handled"
+      >
+        {user && Array.isArray(user) && (
+          <FlatList
+            data={user}
+            renderItem={renderUserItem}
+            keyExtractor={(item) => item.uid}
+            showsVerticalScrollIndicator={false}
+            scrollEnabled={false}
+            ListEmptyComponent={
+              <Text style={{ 
+                textAlign: 'center',
+                color: '#666',
+                marginTop: 20,
+                fontSize: 14
+              }}>
+                No users found matching your search
+              </Text>
+            }
+          />
+        )}
+      </ScrollView>
+    </View>
   );
 };
 

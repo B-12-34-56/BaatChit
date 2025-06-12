@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useContext } from 'react';
 import {
   View,
   Text,
@@ -17,13 +17,15 @@ import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth } from '../../utils/firebase';
 import { friendRequestService } from '../../services/friendRequestService';
 import { userService } from '../../services/userService';
+import { messageService } from '../../services/messageService';
+import { ChatContext } from '../../context/ChatContext';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';
 import * as Haptics from 'expo-haptics';
 import { useFocusEffect } from '@react-navigation/native';
 
-const FriendList = ({ onSelectFriend }) => {
+const FriendList = () => {
   const [currentUser] = useAuthState(auth);
   const [friends, setFriends] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -32,6 +34,8 @@ const FriendList = ({ onSelectFriend }) => {
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState('');
   const [addingFriend, setAddingFriend] = useState(false);
+  const [chatLoading, setChatLoading] = useState('');
+  const { dispatch } = useContext(ChatContext);
 
   // Animation values
   const fadeAnim = new Animated.Value(0);
@@ -118,6 +122,38 @@ const FriendList = ({ onSelectFriend }) => {
     );
   };
 
+  const handleStartChat = async (friend) => {
+    setChatLoading(friend.uid);
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      // Create/get conversation
+      const conversationId = await messageService.createConversation(currentUser.uid, friend.uid);
+      
+      // Update chat context to open the chat
+      dispatch({
+        type: 'CHANGE_USER',
+        payload: {
+          uid: friend.uid,
+          displayName: friend.displayName,
+          photoURL: friend.photoURL,
+          chatId: conversationId
+        }
+      });
+      
+      Toast.show({
+        type: 'success',
+        text1: 'Chat started!',
+      });
+    } catch (err) {
+      console.error('Error starting chat:', err);
+      Toast.show({
+        type: 'error',
+        text1: 'Failed to start chat: ' + (err.message || 'Unknown error'),
+      });
+    }
+    setChatLoading('');
+  };
+
   const handleAddFriend = async () => {
     if (!phoneNumber.trim()) {
       Toast.show({
@@ -183,6 +219,8 @@ const FriendList = ({ onSelectFriend }) => {
   };
 
   const renderFriend = ({ item: friend, index }) => {
+    const isChatLoading = chatLoading === friend.uid;
+
     return (
       <Animated.View
         style={[
@@ -200,7 +238,7 @@ const FriendList = ({ onSelectFriend }) => {
       >
         <TouchableOpacity
           style={styles.friendInfo}
-          onPress={() => onSelectFriend(friend)}
+          onPress={() => handleStartChat(friend)}
         >
           <Image
             source={{ 
@@ -215,12 +253,25 @@ const FriendList = ({ onSelectFriend }) => {
             </Text>
           </View>
         </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.removeButton}
-          onPress={() => handleRemoveFriend(friend)}
-        >
-          <Ionicons name="close-circle" size={24} color="#ff4444" />
-        </TouchableOpacity>
+        <View style={styles.actions}>
+          <TouchableOpacity
+            style={[styles.actionButton, styles.chatButton]}
+            onPress={() => handleStartChat(friend)}
+            disabled={isChatLoading}
+          >
+            {isChatLoading ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <Ionicons name="chatbubble" size={20} color="#fff" />
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.actionButton, styles.removeButton]}
+            onPress={() => handleRemoveFriend(friend)}
+          >
+            <Ionicons name="close-circle" size={20} color="#fff" />
+          </TouchableOpacity>
+        </View>
       </Animated.View>
     );
   };
@@ -519,6 +570,16 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  actions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  actionButton: {
+    padding: 8,
+  },
+  chatButton: {
+    marginRight: 8,
   },
 });
 

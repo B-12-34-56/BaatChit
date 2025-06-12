@@ -6,7 +6,8 @@ import {
   updateProfile, 
   signInWithCustomToken,
   PhoneAuthProvider,
-  RecaptchaVerifier
+  RecaptchaVerifier,
+  signInAnonymously
 } from 'firebase/auth';
 import { createUserDocument } from './userService';
 import { 
@@ -50,7 +51,7 @@ export const registerAndLoginWithPhone = async (phoneNumber, otpCode) => {
     console.log('Starting phone authentication process...');
     console.log('Verifying OTP with Twilio...');
     
-    // Verify OTP with Twilio
+    // Step 1: Verify OTP with Twilio
     const verificationResult = await TwilioService.verifyOTP(phoneNumber, otpCode);
     console.log('Twilio verification result:', verificationResult);
     
@@ -60,59 +61,151 @@ export const registerAndLoginWithPhone = async (phoneNumber, otpCode) => {
 
     console.log('Phone number verified successfully:', phoneNumber);
 
+    // Step 2: Get custom token from your backend
+    console.log('Attempting to fetch custom token...');
+    let customToken;
     try {
-      // Check if user already exists with this phone number
-      const usersRef = collection(db, 'users');
-      const q = query(usersRef, where('phoneNumber', '==', phoneNumber));
-      const querySnapshot = await getDocs(q);
+      customToken = await getCustomTokenFromBackend(phoneNumber);
+      console.log('Successfully received custom token');
+    } catch (tokenError) {
+      console.error('Failed to get custom token:', tokenError);
       
-      let user;
+      // For development/testing, create a temporary user with email/password
+      console.log('Creating temporary user for development...');
+      const tempEmail = `${phoneNumber.replace(/[^0-9]/g, '')}@temp.baatchit.com`;
+      const tempPassword = Math.random().toString(36).slice(-8);
       
-      if (querySnapshot.empty) {
-        // Create new user if doesn't exist
-        const userCredential = await createUserWithEmailAndPassword(
-          auth,
-          `${phoneNumber}@baatchit.com`,
-          Math.random().toString(36).slice(-8)
-        );
-        user = userCredential.user;
+      try {
+        const tempCredential = await createUserWithEmailAndPassword(auth, tempEmail, tempPassword);
+        const tempUser = tempCredential.user;
         
-        // Create user document
-        await setDoc(doc(db, 'users', user.uid), {
-          phoneNumber,
+        // Create a temporary user document
+        const userDocRef = doc(db, 'users', tempUser.uid);
+        await setDoc(userDocRef, {
+          uid: tempUser.uid,
+          phoneNumber: phoneNumber,
+          displayName: phoneNumber,
+          avatar: null,
           createdAt: serverTimestamp(),
+          lastLogin: serverTimestamp(),
+          isActive: true,
           friends: [],
-          displayName: null,
-          photoURL: null,
-          email: null
+          friendRequests: [],
+          isTemporary: true,
+          email: tempEmail
         });
-        console.log('New user created in Firebase');
-      } else {
-        // User exists, sign in
-        const userDoc = querySnapshot.docs[0];
-        const userCredential = await signInWithEmailAndPassword(
-          auth,
-          `${phoneNumber}@baatchit.com`,
-          Math.random().toString(36).slice(-8)
-        );
-        user = userCredential.user;
-        console.log('Existing user signed in');
+        
+        console.log('Temporary user document created');
+        return { 
+          user: tempUser, 
+          phoneNumber, 
+          isVerified: true,
+          isTemporary: true 
+        };
+      } catch (tempUserError) {
+        console.error('Failed to create temporary user:', tempUserError);
+        // If user already exists, try to sign in
+        try {
+          const signInCredential = await signInWithEmailAndPassword(auth, tempEmail, tempPassword);
+          const existingUser = signInCredential.user;
+          
+          // Update last login
+          const userDocRef = doc(db, 'users', existingUser.uid);
+          await setDoc(userDocRef, {
+            lastLogin: serverTimestamp(),
+            isActive: true
+          }, { merge: true });
+          
+          return {
+            user: existingUser,
+            phoneNumber,
+            isVerified: true,
+            isTemporary: true
+          };
+        } catch (signInError) {
+          console.error('Failed to sign in with temporary account:', signInError);
+          throw new Error('Failed to create or sign in with temporary account. Please try again.');
+        }
       }
-
-      // Store verified phone number
-      await AsyncStorage.setItem('phoneNumber', phoneNumber);
-      
-      console.log('Phone authentication completed successfully');
-      return { user, phoneNumber, isVerified: true };
-    } catch (firebaseError) {
-      console.error('Firebase operation error:', firebaseError);
-      throw new Error('Failed to authenticate with Firebase: ' + firebaseError.message);
     }
+
+    // Step 3: Sign in with the custom token
+    console.log('Signing in with custom token...');
+    const userCredential = await signInWithCustomToken(auth, customToken);
+    const user = userCredential.user;
+    console.log('Successfully signed in with custom token');
+
+    // Step 4: Check if user document exists
+    const userDocRef = doc(db, 'users', user.uid);
+    const userDoc = await getDoc(userDocRef);
+
+    if (!userDoc.exists()) {
+      // Step 5: Create new user document for first-time users
+      await setDoc(userDocRef, {
+        uid: user.uid,
+        phoneNumber: phoneNumber,
+        displayName: phoneNumber,
+        avatar: null,
+        createdAt: serverTimestamp(),
+        lastLogin: serverTimestamp(),
+        isActive: true,
+        friends: [],
+        friendRequests: [],
+      });
+      console.log('User document created successfully');
+    } else {
+      // Step 6: Update existing user's last login
+      await setDoc(userDocRef, {
+        ...userDoc.data(),
+        lastLogin: serverTimestamp(),
+        isActive: true,
+      });
+      console.log('User document updated successfully');
+    }
+
+    // Store verified phone number
+    await AsyncStorage.setItem('phoneNumber', phoneNumber);
+    
+    console.log('Phone authentication completed successfully');
+    return { user, phoneNumber, isVerified: true };
   } catch (error) {
     console.error('Phone authentication error:', error);
     if (error.message.includes('VerificationCheck was not found')) {
       throw new Error('Verification service is not properly configured. Please contact support.');
     }
+    throw error;
+  }
+};
+
+// Helper function to get custom token from your backend
+const getCustomTokenFromBackend = async (phoneNumber) => {
+  try {
+    console.log('Fetching custom token from backend...');
+    // Replace with your actual backend endpoint
+    const response = await Promise.race([
+      fetch('YOUR_BACKEND_URL/create-custom-token', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ phoneNumber }),
+      }),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Backend request timeout')), 5000)
+      )
+    ]);
+    
+    if (!response.ok) {
+      throw new Error(`Backend responded with status: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    if (!data.customToken) {
+      throw new Error('Backend response missing customToken');
+    }
+    return data.customToken;
+  } catch (error) {
+    console.error('Error getting custom token:', error);
     throw error;
   }
 };
