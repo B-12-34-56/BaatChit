@@ -1,8 +1,28 @@
-import { auth, db } from '../utils/firebase';
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, updateProfile } from 'firebase/auth';
+import { auth, db, functions } from '../utils/firebase';
+import { 
+  createUserWithEmailAndPassword, 
+  signInWithEmailAndPassword, 
+  signOut, 
+  updateProfile, 
+  signInWithCustomToken,
+  PhoneAuthProvider,
+  RecaptchaVerifier
+} from 'firebase/auth';
 import { createUserDocument } from './userService';
+import { 
+  doc, 
+  setDoc, 
+  getDoc, 
+  Timestamp, 
+  serverTimestamp, 
+  collection, 
+  query, 
+  where, 
+  getDocs 
+} from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { TwilioService } from '../utils/twilio';
-import { doc, setDoc, getDoc, Timestamp } from 'firebase/firestore';
 
 export async function register(email, password, displayName) {
   try {
@@ -25,57 +45,92 @@ export async function login(email, password) {
   }
 }
 
-export const registerAndLoginWithPhone = async (phoneNumber, otp) => {
+export const registerAndLoginWithPhone = async (phoneNumber, otpCode) => {
   try {
     console.log('Starting phone authentication process...');
+    console.log('Verifying OTP with Twilio...');
     
-    // First verify the OTP with Twilio
-    const verificationResult = await TwilioService.verifyOTP(phoneNumber, otp);
+    // Verify OTP with Twilio
+    const verificationResult = await TwilioService.verifyOTP(phoneNumber, otpCode);
     console.log('Twilio verification result:', verificationResult);
     
     if (!verificationResult.valid) {
       throw new Error('Invalid verification code');
     }
 
-    // Check if user already exists
-    const userDoc = await getDoc(doc(db, 'users', phoneNumber));
-    const now = Timestamp.now();
-    
-    if (!userDoc.exists()) {
-      // Create new user document with complete user data
-      await setDoc(doc(db, 'users', phoneNumber), {
-        phoneNumber,
-        createdAt: now,
-        lastLogin: now,
-        isActive: true,
-        displayName: `User ${phoneNumber.slice(-4)}`,
-        friends: [],
-        friendRequests: [],
-        photoURL: `https://ui-avatars.com/api/?name=${encodeURIComponent(phoneNumber.slice(-4))}&background=667eea&color=fff&bold=true`
-      });
-      console.log('Created new user document');
-    } else {
-      // Update last login and ensure user is active
-      await setDoc(doc(db, 'users', phoneNumber), {
-        lastLogin: now,
-        isActive: true
-      }, { merge: true });
-      console.log('Updated existing user document');
+    console.log('Phone number verified successfully:', phoneNumber);
+
+    try {
+      // Check if user already exists with this phone number
+      const usersRef = collection(db, 'users');
+      const q = query(usersRef, where('phoneNumber', '==', phoneNumber));
+      const querySnapshot = await getDocs(q);
+      
+      let user;
+      
+      if (querySnapshot.empty) {
+        // Create new user if doesn't exist
+        const userCredential = await createUserWithEmailAndPassword(
+          auth,
+          `${phoneNumber}@baatchit.com`,
+          Math.random().toString(36).slice(-8)
+        );
+        user = userCredential.user;
+        
+        // Create user document
+        await setDoc(doc(db, 'users', user.uid), {
+          phoneNumber,
+          createdAt: serverTimestamp(),
+          friends: [],
+          displayName: null,
+          photoURL: null,
+          email: null
+        });
+        console.log('New user created in Firebase');
+      } else {
+        // User exists, sign in
+        const userDoc = querySnapshot.docs[0];
+        const userCredential = await signInWithEmailAndPassword(
+          auth,
+          `${phoneNumber}@baatchit.com`,
+          Math.random().toString(36).slice(-8)
+        );
+        user = userCredential.user;
+        console.log('Existing user signed in');
+      }
+
+      // Store verified phone number
+      await AsyncStorage.setItem('phoneNumber', phoneNumber);
+      
+      console.log('Phone authentication completed successfully');
+      return { user, phoneNumber, isVerified: true };
+    } catch (firebaseError) {
+      console.error('Firebase operation error:', firebaseError);
+      throw new Error('Failed to authenticate with Firebase: ' + firebaseError.message);
     }
-
-    // Create a mock user object for now
-    // In production, you should implement proper Firebase phone authentication
-    const mockUser = {
-      uid: phoneNumber,
-      phoneNumber,
-      displayName: `User ${phoneNumber.slice(-4)}`,
-      photoURL: `https://ui-avatars.com/api/?name=${encodeURIComponent(phoneNumber.slice(-4))}&background=667eea&color=fff&bold=true`,
-      isActive: true
-    };
-
-    return mockUser;
   } catch (error) {
     console.error('Phone authentication error:', error);
+    if (error.message.includes('VerificationCheck was not found')) {
+      throw new Error('Verification service is not properly configured. Please contact support.');
+    }
+    throw error;
+  }
+};
+
+// Add a function to request phone verification code
+export const requestPhoneVerification = async (phoneNumber) => {
+  try {
+    console.log('Requesting phone verification code...');
+    const requestPhoneCode = httpsCallable(functions, 'requestPhoneCode');
+    
+    const result = await requestPhoneCode({
+      phoneNumber
+    });
+    
+    console.log('Phone verification code requested:', result.data);
+    return result.data;
+  } catch (error) {
+    console.error('Error requesting phone verification:', error);
     throw error;
   }
 };

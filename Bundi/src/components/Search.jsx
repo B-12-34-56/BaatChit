@@ -7,7 +7,13 @@ import {
   Text,
   Image,
   FlatList,
-  Alert
+  Alert,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  Keyboard,
+  TouchableWithoutFeedback
 } from "react-native";
 import {
   collection,
@@ -23,41 +29,35 @@ import { db } from "../utils/firebase";
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth } from '../utils/firebase';
 import { Ionicons } from '@expo/vector-icons';
+import { searchUsers } from '../services/userService';
 
 const UserSearchComponent = () => {
   const [username, setUsername] = useState("");
   const [user, setUser] = useState(null);
   const [err, setErr] = useState(false);
   const [currentUser] = useAuthState(auth);
+  const [loading, setLoading] = useState(false);
 
   const handleSearch = async () => {
+    Keyboard.dismiss();
     setErr(false);
     setUser(null);
-    let q = query(collection(db, "users"));
+    setLoading(true);
+    
     try {
-      const querySnapshot = await getDocs(q);
-      let results = [];
-      querySnapshot.forEach((docSnap) => {
-        const data = docSnap.data();
-        if (!username) {
-          results.push({ uid: docSnap.id, ...data });
-        } else if (username.includes('@')) {
-          if (data.email && data.email.toLowerCase() === username.toLowerCase()) {
-            results.push({ uid: docSnap.id, ...data });
-          }
-        } else {
-          if (data.displayName && data.displayName.toLowerCase().includes(username.toLowerCase())) {
-            results.push({ uid: docSnap.id, ...data });
-          }
-        }
-      });
+      const results = await searchUsers(username);
       if (results.length === 0) {
         setErr(true);
       } else {
-        setUser(results);
+        // Filter out current user from results
+        const filteredResults = results.filter(u => u.uid !== currentUser?.uid);
+        setUser(filteredResults);
       }
     } catch (error) {
+      console.error('Search error:', error);
       setErr(true);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -132,94 +132,140 @@ const UserSearchComponent = () => {
           marginRight: 14,
         }} 
       />
-      <View>
+      <View style={{ flex: 1 }}>
         <Text style={{ 
           fontWeight: '700', 
           fontSize: 15, 
           color: '#3a3a5a' 
         }}>
-          {item.displayName}
+          {item.displayName || 'Unknown User'}
         </Text>
         <Text style={{ 
           fontSize: 13, 
-          color: '#888' 
+          color: '#888',
+          marginTop: 2
         }}>
-          {item.email}
+          {item.phoneNumber}
         </Text>
+        {item.email && (
+          <Text style={{ 
+            fontSize: 13, 
+            color: '#888',
+            marginTop: 2
+          }}>
+            {item.email}
+          </Text>
+        )}
       </View>
     </TouchableOpacity>
   );
 
   return (
-    <View style={{ width: '100%' }}>
-      <View style={{
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: '#f7f8fa',
-        borderRadius: 12,
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        marginBottom: 10,
-        shadowColor: '#2c3e50',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.06,
-        shadowRadius: 4,
-        elevation: 2,
-      }}>
-        <Ionicons name="search" size={20} color="#667eea" style={{ opacity: 0.6, marginRight: 8 }} />
-        <TextInput
-          placeholder="Find a user"
-          onChangeText={setUsername}
-          value={username}
-          style={{
-            flex: 1,
-            fontSize: 15,
-            fontWeight: '500',
-            color: '#222',
-            paddingVertical: 8,
-          }}
-          onSubmitEditing={handleSearch}
-        />
-        <TouchableOpacity
-          onPress={handleSearch}
-          style={{
-            backgroundColor: '#667eea',
-            paddingHorizontal: 14,
+    <KeyboardAvoidingView 
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={{ flex: 1 }}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+    >
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+        <View style={{ flex: 1, paddingTop: 16 }}>
+          <View style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            backgroundColor: '#f7f8fa',
+            borderRadius: 12,
+            paddingHorizontal: 12,
             paddingVertical: 6,
-            borderRadius: 8,
-            marginLeft: 6,
-          }}
-        >
-          <Text style={{
-            color: 'white',
-            fontWeight: '600',
-            fontSize: 14,
+            marginHorizontal: 16,
+            marginBottom: 10,
+            shadowColor: '#2c3e50',
+            shadowOffset: { width: 0, height: 1 },
+            shadowOpacity: 0.06,
+            shadowRadius: 4,
+            elevation: 2,
           }}>
-            Search
-          </Text>
-        </TouchableOpacity>
-      </View>
-      
-      {err && (
-        <Text style={{ 
-          color: "#e53e3e", 
-          fontSize: 13, 
-          fontWeight: '500',
-          marginTop: 4 
-        }}>
-          User not found!
-        </Text>
-      )}
-      
-      {user && Array.isArray(user) && (
-        <FlatList
-          data={user}
-          renderItem={renderUserItem}
-          keyExtractor={(item) => item.uid}
-          showsVerticalScrollIndicator={false}
-        />
-      )}
-    </View>
+            <Ionicons name="search" size={20} color="#667eea" style={{ opacity: 0.6, marginRight: 8 }} />
+            <TextInput
+              placeholder="Search by name, phone, or email"
+              onChangeText={setUsername}
+              value={username}
+              style={{
+                flex: 1,
+                fontSize: 15,
+                fontWeight: '500',
+                color: '#222',
+                paddingVertical: 8,
+              }}
+              onSubmitEditing={handleSearch}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="default"
+              returnKeyType="search"
+            />
+            <TouchableOpacity
+              onPress={handleSearch}
+              style={{
+                backgroundColor: '#667eea',
+                paddingHorizontal: 14,
+                paddingVertical: 6,
+                borderRadius: 8,
+                marginLeft: 6,
+              }}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={{
+                  color: 'white',
+                  fontWeight: '600',
+                  fontSize: 14,
+                }}>
+                  Search
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
+          
+          {err && (
+            <Text style={{ 
+              color: "#e53e3e", 
+              fontSize: 13, 
+              fontWeight: '500',
+              marginTop: 4,
+              marginHorizontal: 16,
+            }}>
+              No users found!
+            </Text>
+          )}
+          
+          <ScrollView 
+            style={{ flex: 1 }}
+            contentContainerStyle={{ paddingHorizontal: 16 }}
+            keyboardShouldPersistTaps="handled"
+          >
+            {user && Array.isArray(user) && (
+              <FlatList
+                data={user}
+                renderItem={renderUserItem}
+                keyExtractor={(item) => item.uid}
+                showsVerticalScrollIndicator={false}
+                scrollEnabled={false}
+                ListEmptyComponent={
+                  <Text style={{ 
+                    textAlign: 'center',
+                    color: '#666',
+                    marginTop: 20,
+                    fontSize: 14
+                  }}>
+                    No users found matching your search
+                  </Text>
+                }
+              />
+            )}
+          </ScrollView>
+        </View>
+      </TouchableWithoutFeedback>
+    </KeyboardAvoidingView>
   );
 };
 

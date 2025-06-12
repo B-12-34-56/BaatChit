@@ -1,8 +1,9 @@
-import { Stack } from 'expo-router';
+import { Stack, Tabs } from 'expo-router';
 import { View, ActivityIndicator } from 'react-native';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Ionicons } from '@expo/vector-icons';
 
 export default function RootLayoutNav() {
   const [isLoading, setIsLoading] = useState(true);
@@ -46,7 +47,7 @@ export default function RootLayoutNav() {
       <Stack.Screen name="index" />
       <Stack.Screen name="phone-login" />
       <Stack.Screen name="verify-otp" />
-      <Stack.Screen name="home" />
+      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="profile" />
       <Stack.Screen name="search" />
     </Stack>

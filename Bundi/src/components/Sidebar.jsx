@@ -17,30 +17,164 @@ const Sidebar = () => {
   const { dispatch } = useContext(ChatContext);
   const [friends, setFriends] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
   const [currentUser] = useAuthState(auth);
   const router = useRouter();
 
   useEffect(() => {
-    if (!currentUser?.uid) return;
+    console.log('[DEBUG] Sidebar useEffect triggered');
+    console.log('[DEBUG] currentUser:', {
+      uid: currentUser?.uid,
+      email: currentUser?.email,
+      isAuthenticated: !!currentUser
+    });
+    
+    if (!currentUser?.uid) {
+      console.log('[DEBUG] No current user found, returning early');
+      setLoading(false);
+      return;
+    }
+
+    // Safety timeout to prevent infinite loading
+    const safetyTimeout = setTimeout(() => {
+      console.log('[DEBUG] Safety timeout triggered - forcing loading state to false');
+      setError('Loading timed out. Please try again.');
+      setLoading(false);
+    }, 3000);
+
+    let isMounted = true;
+
     const fetchFriends = async () => {
+      if (!isMounted) return;
+      
+      console.log('[DEBUG] Starting to fetch friends for user:', currentUser.uid);
       setLoading(true);
+      setError(null);
+      
       try {
-        const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
-        const friendUids = userDoc.exists() ? (userDoc.data().friends || []) : [];
+        console.log('[DEBUG] Attempting to fetch user document from Firestore');
+        const userRef = doc(db, 'users', currentUser.uid);
+        console.log('[DEBUG] User document reference created:', userRef.path);
+        
+        const userDoc = await getDoc(userRef);
+        if (!isMounted) return;
+        
+        console.log('[DEBUG] User document fetch result:', {
+          exists: userDoc.exists(),
+          hasData: !!userDoc.data(),
+          path: userDoc.ref.path
+        });
+        
+        if (!userDoc.exists()) {
+          console.log('[DEBUG] User document not found in Firestore');
+          setError('User profile not found');
+          setFriends([]);
+          return;
+        }
+
+        const userData = userDoc.data();
+        console.log('[DEBUG] User data retrieved:', { 
+          hasFriends: !!userData.friends, 
+          friendsCount: userData.friends?.length || 0,
+          friendsArray: userData.friends || []
+        });
+
+        const friendUids = userData.friends || [];
+        
+        if (!friendUids.length) {
+          console.log('[DEBUG] No friends found in user document');
+          setFriends([]);
+          return;
+        }
+
+        console.log('[DEBUG] Starting to fetch profiles for friends:', friendUids);
         const friendProfiles = [];
+        
         for (const uid of friendUids) {
-          const friendDoc = await getDoc(doc(db, 'users', uid));
-          if (friendDoc.exists()) {
-            friendProfiles.push({ uid, ...friendDoc.data() });
+          if (!isMounted) return;
+          
+          try {
+            console.log('[DEBUG] Fetching profile for friend:', uid);
+            const friendRef = doc(db, 'users', uid);
+            const friendDoc = await getDoc(friendRef);
+            
+            if (!isMounted) return;
+            
+            console.log('[DEBUG] Friend document fetch result:', {
+              uid,
+              exists: friendDoc.exists(),
+              hasData: !!friendDoc.data()
+            });
+            
+            if (friendDoc.exists()) {
+              const friendData = friendDoc.data();
+              friendProfiles.push({ uid, ...friendData });
+              console.log('[DEBUG] Successfully fetched profile for:', {
+                uid,
+                displayName: friendData.displayName || 'No name',
+                email: friendData.email || 'No email'
+              });
+            } else {
+              console.log('[DEBUG] Friend document not found for uid:', uid);
+            }
+          } catch (err) {
+            console.error('[DEBUG] Error fetching individual friend profile:', {
+              uid,
+              error: err.message,
+              code: err.code,
+              stack: err.stack
+            });
           }
         }
+
+        if (!isMounted) return;
+
+        console.log('[DEBUG] Friend fetching complete:', {
+          totalFriends: friendUids.length,
+          successfulFetches: friendProfiles.length,
+          failedFetches: friendUids.length - friendProfiles.length
+        });
+        
         setFriends(friendProfiles);
       } catch (err) {
-        setFriends([]);
+        console.error('[DEBUG] Error in fetchFriends:', {
+          message: err.message,
+          code: err.code,
+          stack: err.stack
+        });
+        if (isMounted) {
+          setError(err.message || 'Failed to load friends');
+          setFriends([]);
+        }
+      } finally {
+        if (isMounted) {
+          console.log('[DEBUG] Clearing loading state and safety timeout');
+          clearTimeout(safetyTimeout);
+          setLoading(false);
+        }
       }
-      setLoading(false);
     };
-    fetchFriends();
+
+    fetchFriends().catch(err => {
+      console.error('[DEBUG] Unhandled error in fetchFriends:', {
+        message: err.message,
+        code: err.code,
+        stack: err.stack
+      });
+      if (isMounted) {
+        setError(err.message || 'Failed to load friends');
+        clearTimeout(safetyTimeout);
+        setLoading(false);
+      }
+    });
+
+    return () => {
+      console.log('[DEBUG] Sidebar useEffect cleanup');
+      isMounted = false;
+      clearTimeout(safetyTimeout);
+      setLoading(false);
+      setError(null);
+    };
   }, [currentUser]);
 
   const renderFriendItem = ({ item }) => (
@@ -109,7 +243,22 @@ const Sidebar = () => {
         backgroundColor: 'rgba(255,255,255,0.95)',
       }}>
         <Navbar />
-        <View style={{ marginVertical: 10 }}>
+        <View style={{ 
+          marginVertical: 10,
+          backgroundColor: '#f8f9fa',
+          borderRadius: 12,
+          padding: 12,
+          borderWidth: 1,
+          borderColor: '#e0e0e0',
+        }}>
+          <Text style={{
+            fontSize: 16,
+            fontWeight: '600',
+            color: '#333',
+            marginBottom: 8,
+          }}>
+            Friend Requests
+          </Text>
           <FriendRequestsDropdown />
         </View>
       </View>
@@ -160,6 +309,30 @@ const Sidebar = () => {
         {loading ? (
           <View style={{ padding: 10, alignItems: 'center' }}>
             <ActivityIndicator size="small" color="#667eea" />
+          </View>
+        ) : error ? (
+          <View style={{ padding: 10, alignItems: 'center' }}>
+            <Text style={{ color: '#ff4444', marginBottom: 10, textAlign: 'center' }}>
+              {error}
+            </Text>
+            <TouchableOpacity
+              onPress={() => {
+                setError(null);
+                setLoading(true);
+                // Re-trigger the useEffect by updating a dependency
+                setFriends([]);
+              }}
+              style={{
+                backgroundColor: '#667eea',
+                paddingHorizontal: 16,
+                paddingVertical: 8,
+                borderRadius: 8,
+              }}
+            >
+              <Text style={{ color: '#fff', fontWeight: '600' }}>
+                Try Again
+              </Text>
+            </TouchableOpacity>
           </View>
         ) : friends.length === 0 ? (
           <Text style={{ fontSize: 13, color: '#aaa', textAlign: 'center', padding: 10 }}>

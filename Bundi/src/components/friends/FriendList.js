@@ -245,6 +245,7 @@ const FriendList = ({ onSelectFriend }) => {
       {loading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#fff" />
+          <Text style={styles.loadingText}>Loading friends...</Text>
         </View>
       ) : error ? (
         <View style={styles.errorContainer}>
@@ -364,6 +365,11 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  loadingText: {
+    color: '#fff',
+    marginTop: 12,
+    fontSize: 16,
   },
   errorContainer: {
     flex: 1,

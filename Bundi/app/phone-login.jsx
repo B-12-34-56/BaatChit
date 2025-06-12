@@ -27,6 +27,9 @@ export default function PhoneLogin() {
   const [lastAttemptTime, setLastAttemptTime] = useState(0);
   const [user] = useAuthState(auth);
   const router = useRouter();
+  const [otp, setOtp] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     // If user is already logged in, redirect to home
@@ -60,20 +63,20 @@ export default function PhoneLogin() {
   }, [user]);
 
   const formatPhoneNumber = (number) => {
-    // Remove all non-digit characters
-    const cleaned = number.replace(/\D/g, '');
+    // Remove all non-digit characters except +
+    const cleaned = number.replace(/[^\d+]/g, '');
     
-    // Add +1 if it's a US number without country code
-    if (cleaned.length === 10) {
-      return `+1${cleaned}`;
-    }
-    
-    // If it already has country code, just add +
-    if (cleaned.length > 10) {
+    // If it doesn't start with +, add +1 for US numbers
+    if (!cleaned.startsWith('+')) {
+      // If it's a 10-digit number, assume it's US
+      if (cleaned.length === 10) {
+        return `+1${cleaned}`;
+      }
+      // Otherwise, just add +
       return `+${cleaned}`;
     }
     
-    return number;
+    return cleaned;
   };
 
   const validatePhoneNumber = (number) => {
@@ -162,6 +165,32 @@ export default function PhoneLogin() {
       Alert.alert('Error', error.message || 'Failed to send verification code');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleVerifyOTP = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      if (!otp || otp.length !== 6) {
+        setError('Please enter a valid 6-digit code');
+        return;
+      }
+
+      const result = await registerAndLoginWithPhone(phoneNumber, otp);
+      
+      if (result.verified) {
+        // Navigate to the main app
+        router.replace('/(tabs)');
+      } else {
+        setError('Verification failed. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error verifying OTP:', error);
+      setError(error.message || 'Failed to verify code. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
 

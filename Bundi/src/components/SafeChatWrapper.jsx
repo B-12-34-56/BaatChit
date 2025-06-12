@@ -17,11 +17,29 @@ const SafeChatWrapper = () => {
     );
   }
   
+  // Check if context is initialized
+  if (!context.initialized) {
+    return (
+      <View style={styles.emptyContainer}>
+        <Text style={styles.emptyText}>Initializing chat...</Text>
+      </View>
+    );
+  }
+  
   // Check if we have a valid chat selected
   if (!context.data?.chatId) {
     return (
       <View style={styles.emptyContainer}>
         <Text style={styles.emptyText}>Select a conversation to start chatting</Text>
+      </View>
+    );
+  }
+  
+  // Check if we have a valid user
+  if (!context.currentUser?.uid) {
+    return (
+      <View style={styles.emptyContainer}>
+        <Text style={styles.emptyText}>Please log in to continue</Text>
       </View>
     );
   }
@@ -51,6 +69,8 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 16,
     color: '#666',
+    textAlign: 'center',
+    paddingHorizontal: 20,
   },
 });
 

@@ -87,8 +87,12 @@ export default function VerifyOTP() {
       setIsLoading(true);
       
       // Register and login with phone
-      await registerAndLoginWithPhone(phoneNumber, code);
+      const result = await registerAndLoginWithPhone(phoneNumber, code);
       
+      if (!result.user) {
+        throw new Error('Failed to create user account');
+      }
+
       // Clear all stored data
       await AsyncStorage.multiRemove([
         'phoneNumber',

@@ -6,8 +6,14 @@ const twilio = require('twilio');
 admin.initializeApp();
 
 // Initialize Twilio client
-const accountSid = 'YOUR_ACCOUNT_SID';
-const authToken = 'YOUR_AUTH_TOKEN';
+const accountSid = process.env.TWILIO_ACCOUNT_SID;
+const authToken = process.env.TWILIO_AUTH_TOKEN;
+const verifyServiceSid = process.env.TWILIO_VERIFY_SERVICE_SID;
+
+if (!accountSid || !authToken || !verifyServiceSid) {
+  throw new Error('Missing required Twilio environment variables');
+}
+
 const client = twilio(accountSid, authToken);
 
 // Function to send verification code
@@ -17,7 +23,7 @@ exports.sendVerification = functions.https.onCall(async (data, context) => {
     
     // Send verification code via Twilio
     const verification = await client.verify.v2
-      .services('YOUR_VERIFY_SERVICE_SID')
+      .services(verifyServiceSid)
       .verifications.create({ to: phoneNumber, channel: 'sms' });
     
     return { success: true, verification };
@@ -34,7 +40,7 @@ exports.verifyCode = functions.https.onCall(async (data, context) => {
     
     // Verify code with Twilio
     const verificationCheck = await client.verify.v2
-      .services('YOUR_VERIFY_SERVICE_SID')
+      .services(verifyServiceSid)
       .verificationChecks.create({ to: phoneNumber, code });
     
     if (verificationCheck.status === 'approved') {
@@ -84,5 +90,67 @@ exports.getCustomToken = functions.https.onCall(async (data, context) => {
   } catch (error) {
     console.error('Error generating custom token:', error);
     throw new functions.https.HttpsError('internal', error.message);
+  }
+});
+
+// Phone verification and token creation
+exports.verifyPhoneAndCreateToken = functions.https.onCall(async (data, context) => {
+  try {
+    console.log('Received data:', data);
+    const { phoneNumber } = data;
+    
+    if (!phoneNumber) {
+      console.error('Phone number is missing');
+      throw new functions.https.HttpsError('invalid-argument', 'Phone number is required');
+    }
+
+    console.log('Checking for existing user with phone:', phoneNumber);
+    // Check if user exists
+    const userSnapshot = await admin.firestore()
+      .collection('users')
+      .where('phoneNumber', '==', phoneNumber)
+      .limit(1)
+      .get();
+
+    let userId;
+    
+    if (userSnapshot.empty) {
+      console.log('Creating new user for phone:', phoneNumber);
+      // Create new user
+      const userRef = await admin.firestore().collection('users').add({
+        phoneNumber,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        lastLogin: admin.firestore.FieldValue.serverTimestamp(),
+        isActive: true,
+        displayName: `User ${phoneNumber.slice(-4)}`,
+        photoURL: `https://ui-avatars.com/api/?name=${encodeURIComponent(phoneNumber.slice(-4))}&background=667eea&color=fff&bold=true`
+      });
+      userId = userRef.id;
+      console.log('Created new user with ID:', userId);
+    } else {
+      console.log('Found existing user:', userSnapshot.docs[0].id);
+      // Update existing user
+      userId = userSnapshot.docs[0].id;
+      await userSnapshot.docs[0].ref.update({
+        lastLogin: admin.firestore.FieldValue.serverTimestamp(),
+        isActive: true
+      });
+    }
+
+    console.log('Creating custom token for user:', userId);
+    // Create custom token
+    const customToken = await admin.auth().createCustomToken(userId, {
+      phoneNumber
+    });
+
+    console.log('Successfully created custom token');
+    return { 
+      customToken,
+      userId,
+      phoneNumber
+    };
+  } catch (error) {
+    console.error('Error in verifyPhoneAndCreateToken:', error);
+    throw new functions.https.HttpsError('internal', error.message || 'An unexpected error occurred');
   }
 }); 

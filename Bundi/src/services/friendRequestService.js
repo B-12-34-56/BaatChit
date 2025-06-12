@@ -353,8 +353,18 @@ export const friendRequestService = {
   async getFriends(userUID) {
     try {
       const userDoc = await getDoc(doc(db, 'users', userUID));
+      if (!userDoc.exists()) {
+        console.log('User document not found');
+        return [];
+      }
+      
       const userData = userDoc.data();
       const friendUIDs = userData?.friends || [];
+      
+      if (!friendUIDs.length) {
+        console.log('No friends found for user');
+        return [];
+      }
       
       const friends = [];
       for (const friendUID of friendUIDs) {
@@ -365,7 +375,8 @@ export const friendRequestService = {
             uid: friendUID,
             displayName: friendData.displayName || 'Unknown User',
             email: friendData.email || '',
-            photoURL: friendData.photoURL || null
+            photoURL: friendData.photoURL || null,
+            phoneNumber: friendData.phoneNumber || null
           });
         }
       }
@@ -373,7 +384,7 @@ export const friendRequestService = {
       return friends;
     } catch (error) {
       console.error('Error getting friends:', error);
-      return [];
+      throw error;
     }
   },
 

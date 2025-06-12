@@ -1,11 +1,11 @@
 import React from 'react';
-import { View, StyleSheet } from 'react-native';
+import { View, StyleSheet, SafeAreaView } from 'react-native';
 import { Stack } from 'expo-router';
-import UserSearchComponent from '../src/components/Search';
+import UserSearchComponent from '../src/components/search';
 
 export default function SearchScreen() {
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       <Stack.Screen
         options={{
           title: 'Search Users',
@@ -22,7 +22,7 @@ export default function SearchScreen() {
       <View style={styles.content}>
         <UserSearchComponent />
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -33,6 +33,5 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    padding: 16,
   },
 }); 

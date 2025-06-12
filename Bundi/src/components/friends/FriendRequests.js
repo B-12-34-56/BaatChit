@@ -7,6 +7,7 @@ import { db } from '../../utils/firebase';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth } from '../../utils/firebase';
+import { Ionicons } from '@expo/vector-icons';
 
 const FriendRequests = () => {
   const [currentUser] = useAuthState(auth);
@@ -149,15 +150,20 @@ const FriendRequests = () => {
           }}
           style={styles.avatar}
         />
-        <View>
-          <Text style={styles.userName}>{req.fromUser?.displayName || req.from}</Text>
-          <Text style={styles.userEmail}>{req.fromUser?.email}</Text>
+        <View style={styles.userDetails}>
+          <Text style={styles.userName} numberOfLines={1}>
+            {req.fromUser?.displayName || req.from}
+          </Text>
+          <Text style={styles.userEmail} numberOfLines={1}>
+            {req.fromUser?.email}
+          </Text>
         </View>
       </View>
       <View style={styles.actions}>
         {acceptedId === req.id ? (
           <View style={styles.acceptedContainer}>
-            <Text style={styles.acceptedText}>✓ Accepted!</Text>
+            <Ionicons name="checkmark-circle" size={20} color="#4CAF50" />
+            <Text style={styles.acceptedText}>Accepted</Text>
           </View>
         ) : (
           <>
@@ -165,25 +171,23 @@ const FriendRequests = () => {
               onPress={() => handleAccept(req.id)} 
               disabled={loadingId === req.id} 
               style={[
+                styles.actionButton,
                 styles.acceptButton,
                 { opacity: loadingId === req.id ? 0.7 : 1 }
               ]}
             >
-              <Text style={styles.buttonText}>
-                {loadingId === req.id ? 'Accepting...' : 'Accept'}
-              </Text>
+              <Ionicons name="checkmark" size={20} color="white" />
             </TouchableOpacity>
             <TouchableOpacity 
               onPress={() => handleReject(req.id)} 
               disabled={loadingId === req.id} 
               style={[
+                styles.actionButton,
                 styles.rejectButton,
                 { opacity: loadingId === req.id ? 0.7 : 1 }
               ]}
             >
-              <Text style={styles.buttonText}>
-                {loadingId === req.id ? 'Rejecting...' : 'Reject'}
-              </Text>
+              <Ionicons name="close" size={20} color="white" />
             </TouchableOpacity>
           </>
         )}
@@ -191,32 +195,43 @@ const FriendRequests = () => {
     </View>
   );
 
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="small" color="#667eea" />
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={styles.errorContainer}>
+        <Text style={styles.errorText}>{error}</Text>
+        <TouchableOpacity 
+          style={styles.retryButton}
+          onPress={() => setLoading(true)}
+        >
+          <Text style={styles.retryButtonText}>Retry</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  if (requests.length === 0) {
+    return (
+      <Text style={styles.emptyText}>No pending requests</Text>
+    );
+  }
+
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Incoming Friend Requests</Text>
-      {loading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#667eea" />
-        </View>
-      ) : error ? (
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity 
-            style={styles.retryButton}
-            onPress={() => setLoading(true)}
-          >
-            <Text style={styles.retryButtonText}>Retry</Text>
-          </TouchableOpacity>
-        </View>
-      ) : requests.length === 0 ? (
-        <Text style={styles.emptyText}>No pending requests</Text>
-      ) : (
-        <FlatList
-          data={requests}
-          keyExtractor={(item) => item.id}
-          renderItem={renderRequest}
-        />
-      )}
+      <FlatList
+        data={requests}
+        keyExtractor={(item) => item.id}
+        renderItem={renderRequest}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.listContainer}
+      />
       <Toast />
     </View>
   );
@@ -225,64 +240,67 @@ const FriendRequests = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    maxWidth: 420,
-    alignSelf: 'center',
-    width: '100%',
-    padding: 24,
   },
-  title: {
-    fontSize: 22,
-    fontWeight: '700',
-    marginBottom: 18,
+  listContainer: {
+    paddingVertical: 4,
   },
   requestItem: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    borderRadius: 8,
+    backgroundColor: 'white',
+    marginBottom: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
   },
   userInfo: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
     flex: 1,
+    marginRight: 8,
+  },
+  userDetails: {
+    flex: 1,
+    marginLeft: 8,
   },
   avatar: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
   },
   userName: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
+    color: '#333',
   },
   userEmail: {
-    fontSize: 13,
-    color: '#888',
+    fontSize: 12,
+    color: '#666',
+    marginTop: 2,
   },
   actions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 4,
+  },
+  actionButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   acceptButton: {
     backgroundColor: '#4CAF50',
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 6,
-    marginRight: 8,
   },
   rejectButton: {
     backgroundColor: '#e53e3e',
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 6,
-  },
-  buttonText: {
-    color: 'white',
-    fontWeight: '600',
   },
   acceptedContainer: {
     flexDirection: 'row',
@@ -291,41 +309,39 @@ const styles = StyleSheet.create({
   },
   acceptedText: {
     color: '#4CAF50',
-    fontWeight: '700',
-    fontSize: 15,
-  },
-  emptyText: {
-    color: '#888',
-    fontWeight: '500',
+    fontSize: 12,
+    fontWeight: '600',
   },
   loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
+    padding: 12,
     alignItems: 'center',
-    padding: 20,
   },
   errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
+    padding: 12,
     alignItems: 'center',
-    padding: 20,
   },
   errorText: {
     color: '#e53e3e',
-    fontSize: 16,
-    marginBottom: 12,
+    fontSize: 12,
+    marginBottom: 8,
     textAlign: 'center',
   },
   retryButton: {
     backgroundColor: '#667eea',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     borderRadius: 6,
   },
   retryButtonText: {
     color: 'white',
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '600',
+  },
+  emptyText: {
+    color: '#666',
+    fontSize: 12,
+    textAlign: 'center',
+    padding: 12,
   },
 });
 

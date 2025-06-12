@@ -25,27 +25,13 @@
   "storage": {
     "rules": "storage.rules"
   },
-  "functions": [
-    {
-      "source": "functions",
-      "runtime": "nodejs20",
-      "codebase": "default"
-    },
-    {
-      "source": "bundi",
-      "codebase": "bundi",
-      "ignore": [
-        "node_modules",
-        ".git",
-        "firebase-debug.log",
-        "firebase-debug.*.log",
-        "*.local"
-      ],
-      "predeploy": [
-        "npm --prefix \"$RESOURCE_DIR\" run lint"
-      ]
-    }
-  ],
+  "functions": {
+    "source": "functions",
+    "runtime": "nodejs20",
+    "predeploy": [
+      "npm --prefix \"$RESOURCE_DIR\" run lint"
+    ]
+  },
   "extensions": {
     "msg91-sms": {
       "MSG91_AUTH_KEY": "YOUR_MSG91_AUTH_KEY",

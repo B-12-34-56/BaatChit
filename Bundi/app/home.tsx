@@ -1,6 +1,6 @@
 // Home.jsx - React Native version
 import React, { useState, useContext } from 'react';
-import { View, Dimensions, TouchableOpacity, Text } from 'react-native';
+import { View, Dimensions, TouchableOpacity, Text, ActivityIndicator } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import Navbar from '../src/components/Navbar';

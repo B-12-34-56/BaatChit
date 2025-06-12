@@ -11,7 +11,8 @@ import {
   Platform,
   ActivityIndicator,
   Modal,
-  ScrollView
+  ScrollView,
+  Linking
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
@@ -645,32 +646,67 @@ const MessageInput = () => {
   }, []);
 
   const handleImagePick = async () => {
-    if (!hasPermission) {
-      Alert.alert('Permission Required', 'Permission to access gallery is required!');
-      return;
-    }
-
     try {
+      // First check if we have permission
+      const { status: existingStatus } = await ImagePicker.getMediaLibraryPermissionsAsync();
+      let finalStatus = existingStatus;
+      
+      // If we don't have permission, request it
+      if (existingStatus !== 'granted') {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        finalStatus = status;
+      }
+      
+      // If we still don't have permission, show alert and return
+      if (finalStatus !== 'granted') {
+        Alert.alert(
+          'Permission Required',
+          'Please grant permission to access your photo library to send images.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { 
+              text: 'Open Settings',
+              onPress: () => Linking.openSettings()
+            }
+          ]
+        );
+        return;
+      }
+
+      // Now launch the image picker with proper options
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: false,
-        quality: 1,
+        allowsEditing: true,
+        quality: 0.8,
+        aspect: [4, 3],
+        exif: false,
       });
 
       if (!result.canceled && result.assets && result.assets[0]) {
         const asset = result.assets[0];
-        if (mounted.current) {
-          setImageUri(asset.uri);
-          setImageFile(asset);
-          setDuplicateWarning('');
-          
-          // Pre-check for duplicates immediately after picking
-          await checkImageDuplicate(asset.uri, asset);
+        
+        // Check file size (10MB limit)
+        if (asset.fileSize && asset.fileSize > 10 * 1024 * 1024) {
+          Alert.alert('Image Too Large', 'Please select an image smaller than 10MB');
+          return;
         }
+        
+        setImageUri(asset.uri);
+        setImageFile({
+          uri: asset.uri,
+          fileName: asset.fileName || `image_${Date.now()}.jpg`,
+          type: asset.type || 'image/jpeg',
+          fileSize: asset.fileSize || 0
+        });
+        setDuplicateWarning('');
       }
     } catch (error) {
       console.error('Error picking image:', error);
-      Alert.alert('Error', 'Failed to pick image');
+      Alert.alert(
+        'Error',
+        'Failed to pick image. Please try again.',
+        [{ text: 'OK' }]
+      );
     }
   };
 

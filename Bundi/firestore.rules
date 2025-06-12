@@ -3,35 +3,77 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+    
     function isValidPhoneNumber() {
       return request.resource.data.phoneNumber.matches('^\\+[1-9]\\d{1,14}$');
     }
 
+    function isValidEmail() {
+      return request.resource.data.email.matches('^[^@]+@[^@]+\\.[^@]+$');
+    }
+
     function isValidUserData() {
       let data = request.resource.data;
-      return isValidPhoneNumber()
+      return (isValidPhoneNumber() || isValidEmail())
         && data.createdAt is timestamp
         && data.lastLogin is timestamp
         && data.isActive is bool;
     }
 
+    function isValidFriendRequest() {
+      let data = request.resource.data;
+      return data.senderId == request.auth.uid
+        && data.status in ['pending', 'accepted', 'rejected']
+        && data.createdAt is timestamp;
+    }
+
     // Users collection
     match /users/{userId} {
-      // Allow read if the document ID matches the phone number in the document
-      allow read: if request.auth == null && resource.data.phoneNumber == userId;
+      // Allow authenticated users to read their own document
+      allow read: if isAuthenticated() && request.auth.uid == userId;
       
-      // Allow create if the data is valid and the document ID matches the phone number
-      allow create: if request.auth == null 
-        && isValidUserData() 
-        && userId == request.resource.data.phoneNumber;
-      
-      // Allow update if the document ID matches the phone number
-      allow update: if request.auth == null 
-        && userId == resource.data.phoneNumber
+      // Allow authenticated users to update their own document (limited fields)
+      allow update: if isAuthenticated() 
+        && request.auth.uid == userId
         && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['lastLogin', 'isActive']);
+            .hasOnly(['lastLogin', 'isActive', 'displayName', 'avatar', 'phoneNumber', 'email', 'friends', 'friendRequests']);
       
-      // Disallow deletion
+      // Allow creation through Cloud Functions only
+      allow create: if request.auth != null 
+        && (request.auth.token.phoneNumber == request.resource.data.phoneNumber
+            || request.auth.token.email == request.resource.data.email)
+        && isValidUserData();
+      
+      // Don't allow client-side deletion
+      allow delete: if false;
+    }
+
+    // Friend requests collection
+    match /friendRequests/{requestId} {
+      // Allow users to create friend requests
+      allow create: if isAuthenticated() 
+        && isValidFriendRequest();
+      
+      // Allow users to read friend requests they're involved in
+      allow read: if isAuthenticated() 
+        && (resource.data.senderId == request.auth.uid 
+            || resource.data.receiverId == request.auth.uid);
+      
+      // Allow users to update friend requests they're involved in
+      allow update: if isAuthenticated() 
+        && (resource.data.senderId == request.auth.uid 
+            || resource.data.receiverId == request.auth.uid)
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['status', 'updatedAt']);
+      
+      // Don't allow deletion
       allow delete: if false;
     }
 

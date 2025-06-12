@@ -8,7 +8,8 @@ import {
   Image,
   Alert,
   KeyboardAvoidingView,
-  Platform
+  Platform,
+  ActivityIndicator
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as Crypto from 'expo-crypto';
@@ -360,27 +361,30 @@ const MessageInput = () => {
             editable={!isUploading}
           />
           
-          <TouchableOpacity 
-            onPress={handleImagePick} 
-            style={styles.attachButton}
-            disabled={isUploading}
-          >
-            <Text style={styles.attachIcon}>📎</Text>
-          </TouchableOpacity>
+          {data?.chatId && (
+            <TouchableOpacity
+              onPress={handleImagePick}
+              style={styles.attachButton}
+              disabled={isUploading}
+            >
+              <Text style={styles.attachIcon}>��</Text>
+            </TouchableOpacity>
+          )}
           
-          <TouchableOpacity 
-            onPress={handleSend} 
+          <TouchableOpacity
+            onPress={handleSend}
             style={[
               styles.sendButton,
-              { 
-                opacity: (isUploading || isBlocked) ? 0.5 : 1 
-              }
+              isUploading && styles.disabledButton,
+              isBlocked && imageUri && styles.blockedButton
             ]}
-            disabled={isUploading || isBlocked}
+            disabled={Boolean(isUploading) || Boolean(!text.trim() && !imageUri)}
           >
-            <Text style={styles.sendButtonText}>
-              {isUploading ? 'Uploading...' : 'Send'}
-            </Text>
+            {isUploading ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text style={styles.sendButtonText}>Send</Text>
+            )}
           </TouchableOpacity>
         </View>
         
@@ -505,6 +509,12 @@ const styles = StyleSheet.create({
     fontSize: 24,
     color: '#e53e3e',
     fontWeight: 'bold',
+  },
+  disabledButton: {
+    backgroundColor: '#ccc',
+  },
+  blockedButton: {
+    backgroundColor: '#e53e3e',
   },
 });
 

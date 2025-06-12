@@ -16,12 +16,13 @@ import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth } from '../utils/firebase';
 import { PhoneAuthProvider, signInWithCredential, signInWithCustomToken } from 'firebase/auth';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { TwilioService } from '../utils/twilio';
 
 const AuthScreen = () => {
   const [user, loading] = useAuthState(auth);
+  const router = useRouter();
   const [phoneNumber, setPhoneNumber] = useState('');
   const [verificationCode, setVerificationCode] = useState('');
   const [showVerification, setShowVerification] = useState(false);
@@ -29,6 +30,24 @@ const AuthScreen = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [verificationId, setVerificationId] = useState('');
   const [verificationSent, setVerificationSent] = useState(false);
+
+  // Redirect if user is already authenticated
+  useEffect(() => {
+    if (user && !loading) {
+      console.log('User authenticated, redirecting to home');
+      router.replace('/(tabs)');
+    }
+  }, [user, loading, router]);
+
+  // Show loading state while checking auth
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#667eea" />
+        <Text style={styles.loadingText}>Loading...</Text>
+      </View>
+    );
+  }
 
   // Check for existing verification attempt on mount
   useEffect(() => {
@@ -81,13 +100,25 @@ const AuthScreen = () => {
       return;
     }
 
+    if (!validatePhoneNumber(phoneNumber)) {
+      Alert.alert('Error', 'Please enter a valid phone number');
+      return;
+    }
+
     try {
       setIsLoading(true);
+      setError(null);
       await TwilioService.sendOTP(phoneNumber);
       setVerificationSent(true);
+      // Store verification attempt
+      await AsyncStorage.setItem('verificationAttempt', JSON.stringify({
+        phoneNumber,
+        timestamp: Date.now()
+      }));
       Alert.alert('Success', 'Verification code sent successfully');
     } catch (error: any) {
       console.error('Error sending code:', error);
+      setError(error.message || 'Failed to send verification code');
       Alert.alert('Error', error.message || 'Failed to send verification code');
     } finally {
       setIsLoading(false);
@@ -277,6 +308,16 @@ const styles = StyleSheet.create({
     color: '#007AFF',
     fontSize: 16,
     marginLeft: 5,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginTop: 20,
   },
 });
 
