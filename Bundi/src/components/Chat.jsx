@@ -54,8 +54,9 @@ const Chat = () => {
           onPress={() => setMenuOpen(false)}
         >
           <View style={styles.menuContent}>
+            <View style={styles.menuDivider} />
             <TouchableOpacity 
-              style={styles.menuItem}
+              style={[styles.menuItem, styles.menuItemBottom]}
               onPress={handleProfile}
             >
               <Ionicons name="person" size={24} color="#333" />
@@ -63,7 +64,7 @@ const Chat = () => {
             </TouchableOpacity>
             
             <TouchableOpacity 
-              style={styles.menuItem}
+              style={[styles.menuItem, styles.menuItemBottom]}
               onPress={handleAddFriend}
             >
               <Ionicons name="person-add" size={24} color="#333" />
@@ -126,6 +127,14 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginLeft: 16,
     color: '#333',
+  },
+  menuDivider: {
+    height: 1,
+    backgroundColor: '#e0e0e0',
+    marginVertical: 8,
+  },
+  menuItemBottom: {
+    borderBottomWidth: 0,
   },
 });
 

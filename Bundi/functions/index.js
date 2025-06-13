@@ -1,6 +1,7 @@
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 const twilio = require('twilio');
+const crypto = require('crypto');
 
 // Initialize Firebase Admin
 admin.initializeApp();
@@ -15,6 +16,18 @@ if (!accountSid || !authToken || !verifyServiceSid) {
 }
 
 const client = twilio(accountSid, authToken);
+
+// Secret key for password generation - should be stored in environment variables
+const PASSWORD_SECRET_KEY = process.env.PASSWORD_SECRET_KEY || 'your-secret-key';
+
+// Function to generate deterministic password
+const generatePassword = (phoneNumber) => {
+  return crypto
+    .createHash('sha256')
+    .update(`${phoneNumber}_${PASSWORD_SECRET_KEY}`)
+    .digest('hex')
+    .substring(0, 16);
+};
 
 // Function to send verification code
 exports.sendVerification = functions.https.onCall(async (data, context) => {
@@ -33,7 +46,7 @@ exports.sendVerification = functions.https.onCall(async (data, context) => {
   }
 });
 
-// Function to verify code
+// Function to verify code and create/update user
 exports.verifyCode = functions.https.onCall(async (data, context) => {
   try {
     const { phoneNumber, code } = data;
@@ -44,14 +57,20 @@ exports.verifyCode = functions.https.onCall(async (data, context) => {
       .verificationChecks.create({ to: phoneNumber, code });
     
     if (verificationCheck.status === 'approved') {
+      // Generate deterministic password
+      const tempPassword = generatePassword(phoneNumber);
+      
       // Get or create user in Firebase Auth
       let user;
       try {
         user = await admin.auth().getUserByPhoneNumber(phoneNumber);
       } catch (error) {
         if (error.code === 'auth/user-not-found') {
+          // Create new user with phone number and generated password
           user = await admin.auth().createUser({
-            phoneNumber: phoneNumber
+            phoneNumber: phoneNumber,
+            password: tempPassword,
+            email: `${phoneNumber}@temp.baatchit.com` // Temporary email
           });
         } else {
           throw error;
@@ -83,6 +102,9 @@ exports.getCustomToken = functions.https.onCall(async (data, context) => {
   try {
     const { phoneNumber } = data;
     
+    // Generate deterministic password
+    const tempPassword = generatePassword(phoneNumber);
+    
     // Create a custom token using the phone number as the UID
     const token = await admin.auth().createCustomToken(phoneNumber);
     
@@ -103,6 +125,9 @@ exports.verifyPhoneAndCreateToken = functions.https.onCall(async (data, context)
       console.error('Phone number is missing');
       throw new functions.https.HttpsError('invalid-argument', 'Phone number is required');
     }
+
+    // Generate deterministic password
+    const tempPassword = generatePassword(phoneNumber);
 
     console.log('Checking for existing user with phone:', phoneNumber);
     // Check if user exists

@@ -23,6 +23,8 @@ import Toast from 'react-native-toast-message';
 import * as Haptics from 'expo-haptics';
 import { useDebouncedCallback } from 'use-debounce';
 import { userService } from '../../services/userService';
+import { collection, query, where, getDocs, onSnapshot, doc } from 'firebase/firestore';
+import { db } from '../../utils/firebase';
 
 const UserSearch = () => {
   const [currentUser] = useAuthState(auth);
@@ -42,77 +44,123 @@ const UserSearch = () => {
   const fadeAnim = new Animated.Value(0);
   const slideAnim = new Animated.Value(0);
 
-  // Fetch friends and outgoing requests for status
-  useEffect(() => {
-    async function fetchStatus() {
-      if (!currentUser?.uid) return;
-      
-      try {
-        setError(null);
-        const [friendsList, outgoingReqs] = await Promise.all([
-          friendRequestService.getFriends(currentUser.uid),
-          friendRequestService.getOutgoingRequests(currentUser.uid)
-        ]);
-        
-        setFriends((friendsList || []).map(u => u?.uid).filter(Boolean));
-        setOutgoing((outgoingReqs || []).map(r => r?.receiverId).filter(Boolean));
-      } catch (err) {
-        console.error('Error fetching user status:', err);
-        setError('Failed to load user status');
-        Toast.show({
-          type: 'error',
-          text1: 'Error loading user status',
-          text2: err.message
-        });
-      }
-    }
-    fetchStatus();
-  }, [currentUser]);
-
   // Debounced search function
-  const debouncedSearch = useDebouncedCallback(
-    async (searchQuery) => {
-      if (!searchQuery.trim()) {
-        setResults([]);
-        return;
+  const debouncedSearch = useDebouncedCallback(async (searchQuery) => {
+    if (!searchQuery.trim() || !currentUser?.uid) {
+      setResults([]);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      let searchResults = [];
+      
+      if (searchType === 'name') {
+        // Search by display name (case-insensitive partial match)
+        const nameQuery = query(
+          collection(db, 'users'),
+          where('displayName', '>=', searchQuery.toLowerCase()),
+          where('displayName', '<=', searchQuery.toLowerCase() + '\uf8ff')
+        );
+        const nameSnapshot = await getDocs(nameQuery);
+        
+        // Also search by email for partial matches
+        const emailQuery = query(
+          collection(db, 'users'),
+          where('email', '>=', searchQuery.toLowerCase()),
+          where('email', '<=', searchQuery.toLowerCase() + '\uf8ff')
+        );
+        const emailSnapshot = await getDocs(emailQuery);
+
+        // Combine and deduplicate results
+        const nameResults = nameSnapshot.docs.map(doc => ({
+          uid: doc.id,
+          ...doc.data()
+        }));
+        const emailResults = emailSnapshot.docs.map(doc => ({
+          uid: doc.id,
+          ...doc.data()
+        }));
+
+        // Merge results and remove duplicates
+        const mergedResults = [...nameResults, ...emailResults];
+        searchResults = mergedResults.filter((user, index, self) =>
+          index === self.findIndex((u) => u.uid === user.uid)
+        );
+      } else {
+        // Search by phone number (partial match)
+        const phoneQuery = query(
+          collection(db, 'users'),
+          where('phoneNumber', '>=', searchQuery),
+          where('phoneNumber', '<=', searchQuery + '\uf8ff')
+        );
+        const phoneSnapshot = await getDocs(phoneQuery);
+        searchResults = phoneSnapshot.docs.map(doc => ({
+          uid: doc.id,
+          ...doc.data()
+        }));
       }
 
-      setLoading(true);
-      try {
-        let searchResults;
-        if (searchType === 'phone') {
-          // Search by phone number
-          const phoneNumber = searchQuery.replace(/[^0-9+]/g, '');
-          if (phoneNumber.length < 10) {
-            setResults([]);
-            setLoading(false);
-            return;
-          }
-          searchResults = await userService.searchUsersByPhone(phoneNumber);
-        } else {
-          // Search by name
-          searchResults = await friendRequestService.searchUsers(searchQuery);
-        }
-        setResults(searchResults);
-        setError(null);
-      } catch (err) {
-        console.error('Search error:', err);
-        setError('Failed to search users');
-        Toast.show({
-          type: 'error',
-          text1: 'Search failed',
-          text2: err.message
-        });
-      } finally {
-        setLoading(false);
-      }
-    },
-    300
-  );
+      // Filter out current user and existing friends
+      searchResults = searchResults.filter(user => 
+        user.uid !== currentUser.uid && 
+        !friends.includes(user.uid) &&
+        !outgoing.includes(user.uid)
+      );
 
+      setResults(searchResults);
+    } catch (err) {
+      console.error('Search error:', err);
+      setError('Failed to search users');
+      Toast.show({
+        type: 'error',
+        text1: 'Search failed',
+        text2: err.message
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, 300);
+
+  // Update search results when query changes
   useEffect(() => {
     debouncedSearch(query);
   }, [query, searchType]);
+
+  // Subscribe to real-time friend updates
+  useEffect(() => {
+    if (!currentUser?.uid) return;
+
+    const userRef = doc(db, 'users', currentUser.uid);
+    const unsubscribe = onSnapshot(userRef, (doc) => {
+      if (doc.exists()) {
+        const userData = doc.data();
+        setFriends(userData.friends || []);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [currentUser]);
+
+  // Subscribe to real-time outgoing requests
+  useEffect(() => {
+    if (!currentUser?.uid) return;
+
+    const requestsQuery = query(
+      collection(db, 'friendRequests'),
+      where('from', '==', currentUser.uid),
+      where('status', '==', 'pending')
+    );
+
+    const unsubscribe = onSnapshot(requestsQuery, (snapshot) => {
+      const requestIds = snapshot.docs.map(doc => doc.data().receiverId);
+      setOutgoing(requestIds);
+    });
+
+    return () => unsubscribe();
+  }, [currentUser]);
 
   const getStatus = (user) => {
     if (!user?.uid) return 'none';

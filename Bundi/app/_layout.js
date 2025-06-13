@@ -1,14 +1,16 @@
-import { Stack, Tabs } from 'expo-router';
+import { Stack } from 'expo-router';
 import { View, ActivityIndicator } from 'react-native';
-import { useEffect, useState } from 'react';
-import { useRouter } from 'expo-router';
+import { useEffect, useState, useRef } from 'react';
+import { useRouter, useSegments } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Ionicons } from '@expo/vector-icons';
+import { auth } from '../src/utils/firebase';
 
 export default function RootLayoutNav() {
   const [isLoading, setIsLoading] = useState(true);
   const [user, setUser] = useState(null);
   const router = useRouter();
+  const segments = useSegments();
+  const navigationRef = useRef(false); // Prevent multiple navigations
 
   useEffect(() => {
     checkAuth();
@@ -29,10 +31,22 @@ export default function RootLayoutNav() {
   };
 
   useEffect(() => {
-    if (!isLoading && !user) {
-      router.replace('/phone-login');
+    // Only navigate once after initial load
+    if (!isLoading && !navigationRef.current) {
+      const inAuthGroup = segments[0] === '(auth)';
+      const currentRoute = segments.join('/');
+      
+      if (!user && !inAuthGroup && currentRoute !== 'phone-login') {
+        // Redirect to the sign-in page
+        navigationRef.current = true;
+        router.replace('/phone-login');
+      } else if (user && inAuthGroup && currentRoute !== 'home') {
+        // Redirect away from the sign-in page
+        navigationRef.current = true;
+        router.replace('/home');
+      }
     }
-  }, [user, isLoading]);
+  }, [user, isLoading]); // Remove segments from dependencies
 
   if (isLoading) {
     return (
@@ -43,37 +57,48 @@ export default function RootLayoutNav() {
   }
 
   return (
-    <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="index" />
-      <Stack.Screen name="phone-login" />
-      <Stack.Screen name="verify-otp" />
-      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-      <Stack.Screen name="profile" />
-      <Stack.Screen name="search" />
-      <Stack.Screen 
-        name="chat" 
+    <Stack>
+      <Stack.Screen
+        name="index"
         options={{
-          headerShown: true,
-          headerTitle: 'Chat',
-          headerBackTitle: 'Back'
+          headerShown: false
         }}
       />
-      <Stack.Screen 
-        name="friend-requests" 
+      <Stack.Screen
+        name="phone-login"
         options={{
-          headerShown: true,
-          headerTitle: 'Friend Requests',
-          headerBackTitle: 'Back'
+          headerShown: false,
+          title: 'Phone Login'
         }}
       />
-      <Stack.Screen 
-        name="add-friend" 
+      <Stack.Screen
+        name="verify-otp"
+        options={{
+          headerShown: false,
+          title: 'Verify OTP'
+        }}
+      />
+      <Stack.Screen
+        name="home"
+        options={{
+          headerShown: false,
+          title: 'Home'
+        }}
+      />
+      <Stack.Screen
+        name="profile"
         options={{
           headerShown: true,
-          headerTitle: 'Add Friend',
-          headerBackTitle: 'Back'
+          title: 'Profile'
+        }}
+      />
+      <Stack.Screen
+        name="search"
+        options={{
+          headerShown: true,
+          title: 'Search'
         }}
       />
     </Stack>
   );
-} 
+}

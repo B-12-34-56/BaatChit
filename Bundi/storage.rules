@@ -1,56 +1,29 @@
 rules_version = '2';
+
 service firebase.storage {
   match /b/{bucket}/o {
-
-    // --- Helper Functions ---
+    // Helper function to check if user is authenticated
     function isAuthenticated() {
       return request.auth != null;
     }
-    function isAllowedImage() {
-      return request.resource.contentType.matches('image/jpeg') || request.resource.contentType.matches('image/png');
-    }
-    function isAllowedPdf() {
-      return request.resource.contentType.matches('application/pdf');
-    }
-    function isAllowedMime() {
-      return isAllowedImage() || isAllowedPdf();
-    }
-    function isFileSizeOk() {
-      return request.resource.size < 10 * 1024 * 1024; // 10 MB
-    }
-    function isAdminUser() {
-      return request.auth.uid in ['adminUid1', 'adminUid2']; // Replace with your admin UIDs
-    }
-    function isServiceAccount() {
-      return request.auth.token.firebase.sign_in_provider == 'serviceAccount';
+    
+    // Helper function to check if user owns the file
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
     }
 
-    // --- 1. User Avatars ---
-    match /avatars/{uid}/{filename} {
-      allow read: if isAuthenticated();
-      allow write, delete: if isAuthenticated() && request.auth.uid == uid && isFileSizeOk() && isAllowedImage();
+    // Allow users to read and write their own files in user_uploads
+    match /user_uploads/{userId}/{allPaths=**} {
+      allow read: if isAuthenticated() && isOwner(userId);
+      allow write: if isAuthenticated() 
+        && isOwner(userId)
+        && request.resource.size < 5 * 1024 * 1024 // 5MB max file size
+        && request.resource.contentType.matches('image/.*'); // Only allow images
     }
 
-    // --- 2. Chat Attachments ---
-    match /chats/{chatId}/messages/{messageId}/{filename} {
-      allow read, write, delete: if isAuthenticated() && isFileSizeOk() && isAllowedMime();
-      // Membership and sender checks must be enforced in your app/backend
-    }
-
-    // --- 3. Room Files ---
-    match /rooms/{roomId}/attachments/{filename} {
-      allow read, write, delete: if isAuthenticated() && isFileSizeOk() && isAllowedMime();
-      // Membership and admin checks must be enforced in your app/backend
-    }
-
-    // --- 4. Admin Backups ---
-    match /admin/backups/{filename} {
-      allow read, write: if isServiceAccount() || isAdminUser();
-    }
-
-    // --- 5. User Uploads ---
-    match /user_uploads/{userId}/{fileName} {
-      allow read, write: if request.auth != null;
+    // Allow authenticated access to all other paths
+    match /{allPaths=**} {
+      allow read, write: if isAuthenticated();
     }
   }
-}
+} 

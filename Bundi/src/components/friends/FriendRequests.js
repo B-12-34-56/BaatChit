@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, FlatList, Image, StyleSheet, Alert, Activ
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth } from '../../utils/firebase';
 import { db } from '../../utils/firebase';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, getDoc } from 'firebase/firestore';
 import { friendRequestService } from '../../services/friendRequestService';
 import { messageService } from '../../services/messageService';
 import { getUserById } from '../../services/userService';
@@ -15,7 +15,8 @@ import * as Haptics from 'expo-haptics';
 
 const FriendRequests = () => {
   const [currentUser] = useAuthState(auth);
-  const [requests, setRequests] = useState([]);
+  const [incomingRequests, setIncomingRequests] = useState([]);
+  const [outgoingRequests, setOutgoingRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [loadingId, setLoadingId] = useState(null);
@@ -29,13 +30,14 @@ const FriendRequests = () => {
     setLoading(true);
     setError(null);
     
-    const q = query(
+    // Subscribe to incoming requests
+    const incomingQuery = query(
       collection(db, 'friendRequests'), 
       where('receiverId', '==', currentUser.uid), 
       where('status', '==', 'pending')
     );
     
-    const unsub = onSnapshot(q, 
+    const incomingUnsub = onSnapshot(incomingQuery, 
       async (snapshot) => {
         if (!isMounted) return;
         
@@ -50,328 +52,303 @@ const FriendRequests = () => {
               return { ...req, fromUser: null };
             }
           }));
-          setRequests(withUserInfo);
-          setError(null);
+          setIncomingRequests(withUserInfo);
         } catch (err) {
-          console.error('Error processing friend requests:', err);
-          setError('Error loading friend requests');
-          Toast.show({
-            type: 'error',
-            text1: 'Error loading friend requests',
-          });
+          console.error('Error processing incoming requests:', err);
+          setError('Error loading incoming requests');
+        }
+      },
+      (error) => {
+        if (!isMounted) return;
+        console.error('Incoming requests listener error:', error);
+        setError('Error loading incoming requests');
+      }
+    );
+
+    // Subscribe to outgoing requests
+    const outgoingQuery = query(
+      collection(db, 'friendRequests'),
+      where('from', '==', currentUser.uid),
+      where('status', '==', 'pending')
+    );
+
+    const outgoingUnsub = onSnapshot(outgoingQuery,
+      async (snapshot) => {
+        if (!isMounted) return;
+        
+        try {
+          const reqs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          const withUserInfo = await Promise.all(reqs.map(async req => {
+            try {
+              const user = await getUserById(req.receiverId);
+              return { ...req, toUser: user };
+            } catch (err) {
+              console.error('Error fetching user info:', err);
+              return { ...req, toUser: null };
+            }
+          }));
+          setOutgoingRequests(withUserInfo);
+        } catch (err) {
+          console.error('Error processing outgoing requests:', err);
+          setError('Error loading outgoing requests');
         } finally {
           setLoading(false);
         }
       },
       (error) => {
         if (!isMounted) return;
-        console.error('FriendRequests listener error:', error);
-        setError('Error loading friend requests');
-        Toast.show({
-          type: 'error',
-          text1: 'Error loading friend requests',
-        });
+        console.error('Outgoing requests listener error:', error);
+        setError('Error loading outgoing requests');
         setLoading(false);
       }
     );
     
     return () => {
       isMounted = false;
-      unsub();
+      incomingUnsub();
+      outgoingUnsub();
     };
   }, [currentUser]);
 
-  const handleAccept = async (id, fromUser) => {
-    setLoadingId(id);
+  const handleAccept = async (requestId, fromUser) => {
+    if (loadingId) return;
+    setLoadingId(requestId);
+    
     try {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      const result = await friendRequestService.acceptFriendRequest(id, currentUser.uid);
-      if (!result.success) {
+      const result = await friendRequestService.acceptFriendRequest(requestId, currentUser.uid);
+      if (result.success) {
         Toast.show({
-          type: 'error',
-          text1: 'Error: ' + (result.message || 'Failed to accept request'),
+          type: 'success',
+          text1: 'Friend request accepted!',
         });
-        setLoadingId(null);
-        return;
-      }
-      Toast.show({
-        type: 'success',
-        text1: 'Friend request accepted!',
-      });
-      
-      // Remove the request from local state immediately
-      setRequests(prevRequests => prevRequests.filter(req => req.id !== id));
-    } catch (err) {
-      Toast.show({
-        type: 'error',
-        text1: 'Error accepting request: ' + err.message,
-      });
-    }
-    setLoadingId(null);
-  };
-  
-  const handleReject = async (id) => {
-    setLoadingId(id);
-    try {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      const result = await friendRequestService.rejectFriendRequest(id, currentUser.uid);
-      if (!result.success) {
-        Toast.show({
-          type: 'error',
-          text1: 'Error: ' + (result.message || 'Failed to reject request'),
-        });
-        setLoadingId(null);
-        return;
-      }
-      Toast.show({
-        type: 'info',
-        text1: 'Friend request rejected.',
-      });
-      
-      // Remove the request from local state immediately
-      setRequests(prevRequests => prevRequests.filter(req => req.id !== id));
-    } catch (err) {
-      Toast.show({
-        type: 'error',
-        text1: 'Error rejecting request: ' + err.message,
-      });
-    }
-    setLoadingId(null);
-  };
-
-  const handleStartChat = async (user) => {
-    setChatLoading(user.uid);
-    try {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      // Create/get conversation
-      const conversationId = await messageService.createConversation(currentUser.uid, user.uid);
-      
-      // Update chat context to open the chat
-      dispatch({
-        type: 'CHANGE_USER',
-        payload: {
-          uid: user.uid,
-          displayName: user.displayName,
-          photoURL: user.photoURL,
-          chatId: conversationId
+        if (Platform.OS === 'ios') {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         }
-      });
-      
-      Toast.show({
-        type: 'success',
-        text1: 'Chat started!',
-      });
-    } catch (err) {
-      console.error('Error starting chat:', err);
+      }
+    } catch (error) {
+      console.error('Error accepting friend request:', error);
       Toast.show({
         type: 'error',
-        text1: 'Failed to start chat: ' + (err.message || 'Unknown error'),
+        text1: 'Failed to accept request',
+        text2: error.message,
       });
+    } finally {
+      setLoadingId(null);
     }
-    setChatLoading('');
   };
 
-  const renderRequest = ({ item }) => {
-    const { id, fromUser } = item;
-    const isLoading = loadingId === id;
-    const isChatLoading = chatLoading === fromUser?.uid;
+  const handleReject = async (requestId) => {
+    if (loadingId) return;
+    setLoadingId(requestId);
+    
+    try {
+      await friendRequestService.rejectFriendRequest(requestId);
+      Toast.show({
+        type: 'success',
+        text1: 'Friend request rejected',
+      });
+      if (Platform.OS === 'ios') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+    } catch (error) {
+      console.error('Error rejecting friend request:', error);
+      Toast.show({
+        type: 'error',
+        text1: 'Failed to reject request',
+        text2: error.message,
+      });
+    } finally {
+      setLoadingId(null);
+    }
+  };
 
-    return (
-      <View style={styles.requestItem}>
-        <TouchableOpacity
-          style={styles.requestContent}
-          onPress={() => handleStartChat(fromUser)}
-        >
-          <Image
-            source={{ 
-              uri: fromUser?.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(fromUser?.displayName || 'User')}&background=667eea&color=fff&bold=true`
-            }}
-            style={styles.avatar}
-          />
-          <View style={styles.requestInfo}>
-            <Text style={styles.requestName}>
-              {fromUser?.displayName || 'Unknown User'}
-            </Text>
-            <Text style={styles.requestText}>
-              wants to be your friend
-            </Text>
-          </View>
-        </TouchableOpacity>
+  const handleCancel = async (requestId) => {
+    if (loadingId) return;
+    setLoadingId(requestId);
+    
+    try {
+      await friendRequestService.cancelFriendRequest(requestId);
+      Toast.show({
+        type: 'success',
+        text1: 'Friend request cancelled',
+      });
+      if (Platform.OS === 'ios') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+    } catch (error) {
+      console.error('Error cancelling friend request:', error);
+      Toast.show({
+        type: 'error',
+        text1: 'Failed to cancel request',
+        text2: error.message,
+      });
+    } finally {
+      setLoadingId(null);
+    }
+  };
 
-        <View style={styles.actions}>
+  const renderRequestItem = ({ item, type }) => (
+    <View style={styles.requestItem}>
+      <Image 
+        source={{ 
+          uri: type === 'incoming' ? item.fromUser?.photoURL : item.toUser?.photoURL || 
+               'https://ui-avatars.com/api/?name=' + (type === 'incoming' ? item.fromUser?.displayName : item.toUser?.displayName || 'User')
+        }} 
+        style={styles.avatar}
+      />
+      <View style={styles.requestInfo}>
+        <Text style={styles.name}>
+          {type === 'incoming' ? item.fromUser?.displayName : item.toUser?.displayName || 'Unknown User'}
+        </Text>
+        <Text style={styles.email}>
+          {type === 'incoming' ? item.fromUser?.email : item.toUser?.email || 'No email'}
+        </Text>
+      </View>
+      <View style={styles.actions}>
+        {type === 'incoming' ? (
+          <>
+            <TouchableOpacity
+              onPress={() => handleAccept(item.id, item.fromUser)}
+              disabled={loadingId === item.id}
+              style={[styles.actionButton, styles.acceptButton]}
+            >
+              {loadingId === item.id ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Ionicons name="checkmark" size={24} color="#fff" />
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => handleReject(item.id)}
+              disabled={loadingId === item.id}
+              style={[styles.actionButton, styles.rejectButton]}
+            >
+              <Ionicons name="close" size={24} color="#fff" />
+            </TouchableOpacity>
+          </>
+        ) : (
           <TouchableOpacity
-            style={[styles.actionButton, styles.acceptButton]}
-            onPress={() => handleAccept(id, fromUser)}
-            disabled={isLoading}
+            onPress={() => handleCancel(item.id)}
+            disabled={loadingId === item.id}
+            style={[styles.actionButton, styles.cancelButton]}
           >
-            {isLoading ? (
-              <ActivityIndicator color="#fff" size="small" />
+            {loadingId === item.id ? (
+              <ActivityIndicator size="small" color="#fff" />
             ) : (
-              <Ionicons name="checkmark" size={24} color="#fff" />
+              <Ionicons name="close" size={24} color="#fff" />
             )}
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.actionButton, styles.rejectButton]}
-            onPress={() => handleReject(id)}
-            disabled={isLoading}
-          >
-            <Ionicons name="close" size={24} color="#fff" />
-          </TouchableOpacity>
-        </View>
+        )}
+      </View>
+    </View>
+  );
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#667eea" />
       </View>
     );
-  };
+  }
 
   return (
-    <LinearGradient
-      colors={['#667eea', '#764ba2']}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
-      style={styles.container}
-    >
-      <View style={styles.header}>
-        <Text style={styles.title}>Friend Requests</Text>
-      </View>
-
-      {loading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#fff" />
-          <Text style={styles.loadingText}>Loading requests...</Text>
-        </View>
-      ) : error ? (
-        <View style={styles.errorContainer}>
-          <Ionicons name="alert-circle" size={48} color="#fff" />
-          <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity
-            style={styles.retryButton}
-            onPress={() => {
-              setError(null);
-              setLoading(true);
-            }}
-          >
-            <Text style={styles.retryButtonText}>Retry</Text>
-          </TouchableOpacity>
-        </View>
-      ) : requests.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <Ionicons name="people-outline" size={48} color="#fff" />
-          <Text style={styles.emptyText}>No pending friend requests</Text>
-        </View>
-      ) : (
-        <FlatList
-          data={requests}
-          renderItem={renderRequest}
-          keyExtractor={(item) => item.id}
-          style={styles.requestsList}
-          showsVerticalScrollIndicator={false}
-        />
+    <View style={styles.container}>
+      {error && (
+        <Text style={styles.errorText}>{error}</Text>
       )}
-    </LinearGradient>
+      
+      {incomingRequests.length > 0 && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Incoming Requests</Text>
+          <FlatList
+            data={incomingRequests}
+            renderItem={(item) => renderRequestItem({ ...item, type: 'incoming' })}
+            keyExtractor={item => item.id}
+            style={styles.list}
+          />
+        </View>
+      )}
+
+      {outgoingRequests.length > 0 && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Outgoing Requests</Text>
+          <FlatList
+            data={outgoingRequests}
+            renderItem={(item) => renderRequestItem({ ...item, type: 'outgoing' })}
+            keyExtractor={item => item.id}
+            style={styles.list}
+          />
+        </View>
+      )}
+
+      {incomingRequests.length === 0 && outgoingRequests.length === 0 && (
+        <View style={styles.emptyContainer}>
+          <Ionicons name="people-outline" size={48} color="#667eea" />
+          <Text style={styles.emptyText}>No friend requests</Text>
+        </View>
+      )}
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-  },
-  header: {
-    padding: 20,
-    paddingTop: Platform.OS === 'ios' ? 60 : 40,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#fff',
+    backgroundColor: '#f7f8fa',
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  loadingText: {
-    color: '#fff',
-    marginTop: 12,
-    fontSize: 16,
+  section: {
+    marginBottom: 20,
   },
-  errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  errorText: {
-    color: '#fff',
-    fontSize: 16,
-    marginTop: 12,
-    textAlign: 'center',
-  },
-  retryButton: {
-    marginTop: 16,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    backgroundColor: '#fff',
-    borderRadius: 8,
-  },
-  retryButtonText: {
-    color: '#667eea',
-    fontSize: 16,
+  sectionTitle: {
+    fontSize: 18,
     fontWeight: '600',
+    color: '#333',
+    marginHorizontal: 16,
+    marginVertical: 8,
   },
-  emptyContainer: {
+  list: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  emptyText: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#fff',
-    marginTop: 16,
-  },
-  requestsList: {
-    padding: 16,
   },
   requestItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 8,
-  },
-  requestContent: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
+    padding: 16,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
   },
   avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     marginRight: 12,
   },
   requestInfo: {
     flex: 1,
   },
-  requestName: {
+  name: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#fff',
-    marginBottom: 2,
+    color: '#333',
   },
-  requestText: {
+  email: {
     fontSize: 14,
-    color: 'rgba(255,255,255,0.7)',
+    color: '#666',
+    marginTop: 2,
   },
   actions: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   actionButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
     marginLeft: 8,
@@ -380,7 +357,26 @@ const styles = StyleSheet.create({
     backgroundColor: '#4CAF50',
   },
   rejectButton: {
-    backgroundColor: '#FF3B30',
+    backgroundColor: '#f44336',
+  },
+  cancelButton: {
+    backgroundColor: '#9e9e9e',
+  },
+  errorText: {
+    color: '#f44336',
+    textAlign: 'center',
+    margin: 16,
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  emptyText: {
+    fontSize: 16,
+    color: '#666',
+    marginTop: 12,
   },
 });
 

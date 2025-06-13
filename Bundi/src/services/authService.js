@@ -1,37 +1,41 @@
-import { auth, db, functions } from '../utils/firebase';
 import { 
   createUserWithEmailAndPassword, 
-  signInWithEmailAndPassword, 
-  signOut, 
-  updateProfile, 
-  signInWithCustomToken,
+  signInWithEmailAndPassword,
+  signInWithPhoneNumber,
   PhoneAuthProvider,
   RecaptchaVerifier,
   signInAnonymously
 } from 'firebase/auth';
-import { createUserDocument } from './userService';
+import { auth, db } from '../utils/firebase';
 import { 
+  collection, 
   doc, 
   setDoc, 
   getDoc, 
-  Timestamp, 
-  serverTimestamp, 
-  collection, 
-  query, 
-  where, 
   getDocs 
 } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
+import { httpsCallable, getFunctions } from 'firebase/functions';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { TwilioService } from '../utils/twilio';
+import { createUserDocument } from './userService';
+
+const firebaseFunctions = getFunctions();
 
 export async function register(email, password, displayName) {
   try {
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-    await updateProfile(userCredential.user, { displayName });
-    return userCredential.user;
+    const user = userCredential.user;
+    
+    // Create user document in Firestore
+    await createUserDocument(user.uid, {
+      email,
+      displayName,
+      createdAt: new Date().toISOString()
+    });
+    
+    return user;
   } catch (error) {
-    console.error('Registration error:', error);
+    console.error('Error registering user:', error);
     throw error;
   }
 }
@@ -41,7 +45,7 @@ export async function login(email, password) {
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
     return userCredential.user;
   } catch (error) {
-    console.error('Login error:', error);
+    console.error('Error logging in:', error);
     throw error;
   }
 }
@@ -183,7 +187,7 @@ const getCustomTokenFromBackend = async (phoneNumber) => {
     console.log('Fetching custom token from backend...');
     // Replace with your actual backend endpoint
     const response = await Promise.race([
-      fetch('YOUR_BACKEND_URL/create-custom-token', {
+      fetch('https://verify.twilio.com/v2/Services/VA87818ecf299afe43e5422c2986cf0c1f/Verifications', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -214,7 +218,7 @@ const getCustomTokenFromBackend = async (phoneNumber) => {
 export const requestPhoneVerification = async (phoneNumber) => {
   try {
     console.log('Requesting phone verification code...');
-    const requestPhoneCode = httpsCallable(functions, 'requestPhoneCode');
+    const requestPhoneCode = httpsCallable(firebaseFunctions, 'requestPhoneCode');
     
     const result = await requestPhoneCode({
       phoneNumber
@@ -236,3 +240,64 @@ export async function logout() {
     throw error;
   }
 }
+
+export const authService = {
+  // Send OTP to phone number
+  sendOTP: async (phoneNumber) => {
+    try {
+      const sendVerification = httpsCallable(firebaseFunctions, 'sendVerification');
+      const result = await sendVerification({ phoneNumber });
+      return result.data;
+    } catch (error) {
+      console.error('Error sending OTP:', error);
+      throw error;
+    }
+  },
+
+  // Verify OTP and sign in
+  verifyOTP: async (phoneNumber, code) => {
+    try {
+      // First verify the OTP with Twilio
+      const verificationResult = await TwilioService.verifyOTP(phoneNumber, code);
+      
+      if (verificationResult.valid) {
+        // Get the custom token from our Cloud Function
+        const verifyPhoneAndCreateToken = httpsCallable(firebaseFunctions, 'verifyPhoneAndCreateToken');
+        const result = await verifyPhoneAndCreateToken({ phoneNumber });
+        
+        // Sign in with the custom token
+        await auth.signInWithCustomToken(result.data.customToken);
+        
+        return {
+          success: true,
+          user: result.data
+        };
+      } else {
+        throw new Error('Invalid verification code');
+      }
+    } catch (error) {
+      console.error('Error verifying OTP:', error);
+      throw error;
+    }
+  },
+
+  // Sign out
+  signOut: async () => {
+    try {
+      await auth.signOut();
+    } catch (error) {
+      console.error('Error signing out:', error);
+      throw error;
+    }
+  },
+
+  // Get current user
+  getCurrentUser: () => {
+    return auth.currentUser;
+  },
+
+  // Listen to auth state changes
+  onAuthStateChanged: (callback) => {
+    return auth.onAuthStateChanged(callback);
+  }
+};

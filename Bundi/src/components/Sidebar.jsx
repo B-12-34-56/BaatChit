@@ -1,8 +1,8 @@
 // Sidebar.jsx - React Native version
-import React, { useContext, useEffect, useState } from 'react';
-import { View, Text, FlatList, TouchableOpacity, Image, ActivityIndicator } from 'react-native';
+import React, { useContext, useEffect, useState, useRef } from 'react';
+import { View, Text, FlatList, TouchableOpacity, Image, ActivityIndicator, ScrollView } from 'react-native';
 import { db } from '../utils/firebase';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot, collection, query, where, getDocs } from 'firebase/firestore';
 import { ChatContext } from '../context/ChatContext';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth } from '../utils/firebase';
@@ -12,6 +12,8 @@ import { Ionicons } from '@expo/vector-icons';
 import Navbar from './Navbar';
 import Chats from './Chats';
 import FriendRequestsDropdown from './FriendRequestsDropdown';
+import Toast from 'react-native-toast-message';
+import { messageService } from '../services/messageService';
 
 const Sidebar = () => {
   const { dispatch } = useContext(ChatContext);
@@ -23,48 +25,22 @@ const Sidebar = () => {
 
   useEffect(() => {
     console.log('[DEBUG] Sidebar useEffect triggered');
-    console.log('[DEBUG] currentUser:', {
-      uid: currentUser?.uid,
-      email: currentUser?.email,
-      isAuthenticated: !!currentUser
-    });
-    
     if (!currentUser?.uid) {
       console.log('[DEBUG] No current user found, returning early');
       setLoading(false);
       return;
     }
 
-    // Safety timeout to prevent infinite loading
-    const safetyTimeout = setTimeout(() => {
-      console.log('[DEBUG] Safety timeout triggered - forcing loading state to false');
-      setError('Loading timed out. Please try again.');
-      setLoading(false);
-    }, 3000);
-
     let isMounted = true;
+    setLoading(true);
+    setError(null);
 
-    const fetchFriends = async () => {
+    // Subscribe to user document for real-time friend updates
+    const userRef = doc(db, 'users', currentUser.uid);
+    const unsubscribeUser = onSnapshot(userRef, async (userDoc) => {
       if (!isMounted) return;
-      
-      console.log('[DEBUG] Starting to fetch friends for user:', currentUser.uid);
-      setLoading(true);
-      setError(null);
-      
+
       try {
-        console.log('[DEBUG] Attempting to fetch user document from Firestore');
-        const userRef = doc(db, 'users', currentUser.uid);
-        console.log('[DEBUG] User document reference created:', userRef.path);
-        
-        const userDoc = await getDoc(userRef);
-        if (!isMounted) return;
-        
-        console.log('[DEBUG] User document fetch result:', {
-          exists: userDoc.exists(),
-          hasData: !!userDoc.data(),
-          path: userDoc.ref.path
-        });
-        
         if (!userDoc.exists()) {
           console.log('[DEBUG] User document not found in Firestore');
           setError('User profile not found');
@@ -73,97 +49,54 @@ const Sidebar = () => {
         }
 
         const userData = userDoc.data();
-        console.log('[DEBUG] User data retrieved:', { 
-          hasFriends: !!userData.friends, 
-          friendsCount: userData.friends?.length || 0,
-          friendsArray: userData.friends || []
-        });
-
         const friendUids = userData.friends || [];
-        
+
         if (!friendUids.length) {
           console.log('[DEBUG] No friends found in user document');
           setFriends([]);
           return;
         }
 
-        console.log('[DEBUG] Starting to fetch profiles for friends:', friendUids);
-        const friendProfiles = [];
-        
-        for (const uid of friendUids) {
+        // Create a query to get all friends' documents
+        const friendsQuery = query(
+          collection(db, 'users'),
+          where('uid', 'in', friendUids)
+        );
+
+        // Subscribe to friends' documents
+        const unsubscribeFriends = onSnapshot(friendsQuery, (snapshot) => {
           if (!isMounted) return;
-          
-          try {
-            console.log('[DEBUG] Fetching profile for friend:', uid);
-            const friendRef = doc(db, 'users', uid);
-            const friendDoc = await getDoc(friendRef);
-            
-            if (!isMounted) return;
-            
-            console.log('[DEBUG] Friend document fetch result:', {
-              uid,
-              exists: friendDoc.exists(),
-              hasData: !!friendDoc.data()
-            });
-            
-            if (friendDoc.exists()) {
-              const friendData = friendDoc.data();
-              friendProfiles.push({ uid, ...friendData });
-              console.log('[DEBUG] Successfully fetched profile for:', {
-                uid,
-                displayName: friendData.displayName || 'No name',
-                email: friendData.email || 'No email'
-              });
-            } else {
-              console.log('[DEBUG] Friend document not found for uid:', uid);
-            }
-          } catch (err) {
-            console.error('[DEBUG] Error fetching individual friend profile:', {
-              uid,
-              error: err.message,
-              code: err.code,
-              stack: err.stack
-            });
+
+          const friendProfiles = snapshot.docs.map(doc => ({
+            uid: doc.id,
+            ...doc.data()
+          }));
+
+          console.log('[DEBUG] Friends updated:', friendProfiles.length);
+          setFriends(friendProfiles);
+          setLoading(false);
+        }, (error) => {
+          console.error('[DEBUG] Error in friends listener:', error);
+          if (isMounted) {
+            setError('Failed to load friends');
+            setLoading(false);
           }
-        }
-
-        if (!isMounted) return;
-
-        console.log('[DEBUG] Friend fetching complete:', {
-          totalFriends: friendUids.length,
-          successfulFetches: friendProfiles.length,
-          failedFetches: friendUids.length - friendProfiles.length
         });
-        
-        setFriends(friendProfiles);
+
+        return () => {
+          unsubscribeFriends();
+        };
       } catch (err) {
-        console.error('[DEBUG] Error in fetchFriends:', {
-          message: err.message,
-          code: err.code,
-          stack: err.stack
-        });
+        console.error('[DEBUG] Error in user listener:', err);
         if (isMounted) {
           setError(err.message || 'Failed to load friends');
-          setFriends([]);
-        }
-      } finally {
-        if (isMounted) {
-          console.log('[DEBUG] Clearing loading state and safety timeout');
-          clearTimeout(safetyTimeout);
           setLoading(false);
         }
       }
-    };
-
-    fetchFriends().catch(err => {
-      console.error('[DEBUG] Unhandled error in fetchFriends:', {
-        message: err.message,
-        code: err.code,
-        stack: err.stack
-      });
+    }, (error) => {
+      console.error('[DEBUG] Error in user listener:', error);
       if (isMounted) {
-        setError(err.message || 'Failed to load friends');
-        clearTimeout(safetyTimeout);
+        setError('Failed to load user data');
         setLoading(false);
       }
     });
@@ -171,43 +104,77 @@ const Sidebar = () => {
     return () => {
       console.log('[DEBUG] Sidebar useEffect cleanup');
       isMounted = false;
-      clearTimeout(safetyTimeout);
-      setLoading(false);
-      setError(null);
+      unsubscribeUser();
     };
   }, [currentUser]);
 
+  const handleStartChat = async (friend) => {
+    try {
+      // Create/get conversation
+      const conversationId = await messageService.createConversation(currentUser.uid, friend.uid);
+      
+      // Update chat context to open the chat
+      dispatch({
+        type: 'CHANGE_USER',
+        payload: {
+          uid: friend.uid,
+          displayName: friend.displayName,
+          photoURL: friend.photoURL,
+          chatId: conversationId
+        }
+      });
+      
+      Toast.show({
+        type: 'success',
+        text1: 'Chat started!',
+      });
+    } catch (err) {
+      console.error('Error starting chat:', err);
+      Toast.show({
+        type: 'error',
+        text1: 'Failed to start chat: ' + (err.message || 'Unknown error'),
+      });
+    }
+  };
+
   const renderFriendItem = ({ item }) => (
     <TouchableOpacity
-      onPress={() => dispatch({ type: 'CHANGE_USER', payload: item })}
+      onPress={() => handleStartChat(item)}
       style={{
         flexDirection: 'row',
         alignItems: 'center',
         paddingVertical: 8,
+        paddingHorizontal: 12,
+        backgroundColor: '#fff',
+        borderRadius: 8,
+        marginBottom: 8,
+        borderWidth: 1,
+        borderColor: '#e0e0e0',
       }}
     >
       <Image 
         source={{ uri: item.photoURL || 'https://ui-avatars.com/api/?name=' + (item.displayName || 'User') }} 
         style={{ 
-          width: 28, 
-          height: 28, 
-          borderRadius: 14,
-          marginRight: 10,
+          width: 40, 
+          height: 40, 
+          borderRadius: 20,
+          marginRight: 12,
         }} 
       />
       <View style={{ flex: 1 }}>
         <Text style={{ 
           fontWeight: '600', 
-          fontSize: 14,
+          fontSize: 16,
           color: '#333',
+          marginBottom: 2,
         }}>
           {item.displayName || item.email}
         </Text>
         <Text style={{ 
-          fontSize: 12, 
-          color: '#888',
+          fontSize: 14, 
+          color: '#666',
         }}>
-          {item.email}
+          {item.isOnline ? 'Online' : 'Offline'}
         </Text>
       </View>
     </TouchableOpacity>
@@ -255,7 +222,54 @@ const Sidebar = () => {
         </View>
       </View>
 
-      {/* Friends and Search Section */}
+      {/* Friends Section */}
+      <View style={{
+        paddingHorizontal: 18,
+        paddingTop: 18,
+        paddingBottom: 10,
+        borderBottomWidth: 1.5,
+        borderBottomColor: '#e0e0e0',
+        backgroundColor: 'rgba(255,255,255,0.92)',
+      }}>
+        <Text style={{
+          fontSize: 18,
+          fontWeight: '600',
+          color: '#333',
+          marginBottom: 12,
+        }}>
+          Friends
+        </Text>
+        {loading ? (
+          <ActivityIndicator size="small" color="#667eea" />
+        ) : error ? (
+          <Text style={{ color: '#f44336', marginBottom: 12 }}>{error}</Text>
+        ) : friends.length === 0 ? (
+          <View style={{
+            padding: 16,
+            backgroundColor: '#f8f9fa',
+            borderRadius: 8,
+            borderWidth: 1,
+            borderColor: '#e0e0e0',
+          }}>
+            <Text style={{
+              color: '#666',
+              textAlign: 'center',
+            }}>
+              No friends yet. Add some friends to start chatting!
+            </Text>
+          </View>
+        ) : (
+          <FlatList
+            data={friends}
+            renderItem={renderFriendItem}
+            keyExtractor={item => item.uid}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ paddingBottom: 12 }}
+          />
+        )}
+      </View>
+
+      {/* Search Section */}
       <View style={{
         paddingHorizontal: 18,
         paddingTop: 18,

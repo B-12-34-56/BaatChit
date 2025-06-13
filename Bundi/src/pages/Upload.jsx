@@ -81,7 +81,7 @@ export default function UploadToS3() {
     }
 
     const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ImagePicker.MediaTypeOptions.images,
       allowsEditing: true,
       quality: 0.8,
     });
@@ -108,7 +108,7 @@ export default function UploadToS3() {
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ImagePicker.MediaTypeOptions.images,
       allowsEditing: true,
       quality: 0.8,
     });

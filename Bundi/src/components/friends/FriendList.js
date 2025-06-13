@@ -11,10 +11,11 @@ import {
   Animated,
   Alert,
   TextInput,
-  Modal
+  Modal,
+  Platform
 } from 'react-native';
 import { useAuthState } from 'react-firebase-hooks/auth';
-import { auth } from '../../utils/firebase';
+import { auth, db } from '../../utils/firebase';
 import { friendRequestService } from '../../services/friendRequestService';
 import { userService } from '../../services/userService';
 import { messageService } from '../../services/messageService';
@@ -24,6 +25,7 @@ import { Ionicons } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';
 import * as Haptics from 'expo-haptics';
 import { useFocusEffect } from '@react-navigation/native';
+import { doc, onSnapshot, collection, query, where, getDocs } from 'firebase/firestore';
 
 const FriendList = () => {
   const [currentUser] = useAuthState(auth);
@@ -41,51 +43,86 @@ const FriendList = () => {
   const fadeAnim = new Animated.Value(0);
   const slideAnim = new Animated.Value(0);
 
-  const loadFriends = useCallback(async () => {
+  // Subscribe to real-time friend updates
+  useEffect(() => {
     if (!currentUser?.uid) return;
-    
-    try {
-      setError(null);
-      const friendsList = await friendRequestService.getFriends(currentUser.uid);
-      setFriends(friendsList || []);
-    } catch (err) {
-      console.error('Error loading friends:', err);
-      setError('Failed to load friends');
-      Toast.show({
-        type: 'error',
-        text1: 'Error loading friends',
-        text2: err.message
-      });
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [currentUser]);
 
-  useFocusEffect(
-    useCallback(() => {
-      loadFriends();
-      
-      // Animate in
-      Animated.parallel([
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-        Animated.timing(slideAnim, {
-          toValue: 1,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-      ]).start();
-    }, [loadFriends])
-  );
+    let isMounted = true;
+    setLoading(true);
+    setError(null);
+
+    // Subscribe to user document for friend list updates
+    const userRef = doc(db, 'users', currentUser.uid);
+    const unsubscribe = onSnapshot(userRef, async (userDoc) => {
+      if (!isMounted) return;
+
+      try {
+        if (!userDoc.exists()) {
+          console.log('User document not found');
+          setFriends([]);
+          return;
+        }
+
+        const userData = userDoc.data();
+        const friendUids = userData.friends || [];
+
+        if (!friendUids.length) {
+          console.log('No friends found');
+          setFriends([]);
+          return;
+        }
+
+        // Get friend profiles
+        const friendsQuery = query(
+          collection(db, 'users'),
+          where('uid', 'in', friendUids)
+        );
+
+        const friendsSnapshot = await getDocs(friendsQuery);
+        const friendsList = friendsSnapshot.docs.map(doc => ({
+          uid: doc.id,
+          ...doc.data()
+        }));
+
+        if (isMounted) {
+          setFriends(friendsList);
+          setError(null);
+        }
+      } catch (err) {
+        console.error('Error fetching friends:', err);
+        if (isMounted) {
+          setError('Failed to load friends');
+          Toast.show({
+            type: 'error',
+            text1: 'Error loading friends',
+            text2: err.message
+          });
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+          setRefreshing(false);
+        }
+      }
+    }, (error) => {
+      console.error('Error in friends listener:', error);
+      if (isMounted) {
+        setError('Failed to load friends');
+        setLoading(false);
+        setRefreshing(false);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
+  }, [currentUser]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    loadFriends();
-  }, [loadFriends]);
+    // The real-time listener will handle the refresh
+  }, []);
 
   const handleRemoveFriend = async (friend) => {
     Alert.alert(
@@ -101,9 +138,10 @@ const FriendList = () => {
           style: 'destructive',
           onPress: async () => {
             try {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              if (Platform.OS === 'ios') {
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+              }
               await friendRequestService.removeFriend(currentUser.uid, friend.uid);
-              setFriends(friends.filter(f => f.uid !== friend.uid));
               Toast.show({
                 type: 'success',
                 text1: 'Friend removed',
@@ -125,7 +163,9 @@ const FriendList = () => {
   const handleStartChat = async (friend) => {
     setChatLoading(friend.uid);
     try {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      if (Platform.OS === 'ios') {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      }
       // Create/get conversation
       const conversationId = await messageService.createConversation(currentUser.uid, friend.uid);
       
@@ -148,7 +188,8 @@ const FriendList = () => {
       console.error('Error starting chat:', err);
       Toast.show({
         type: 'error',
-        text1: 'Failed to start chat: ' + (err.message || 'Unknown error'),
+        text1: 'Failed to start chat',
+        text2: err.message
       });
     }
     setChatLoading('');
@@ -239,6 +280,7 @@ const FriendList = () => {
         <TouchableOpacity
           style={styles.friendInfo}
           onPress={() => handleStartChat(friend)}
+          disabled={isChatLoading}
         >
           <Image
             source={{ 
@@ -249,10 +291,11 @@ const FriendList = () => {
           <View style={styles.friendDetails}>
             <Text style={styles.friendName}>{friend.displayName || 'Unknown User'}</Text>
             <Text style={styles.friendStatus}>
-              {friend.phoneNumber || friend.status || 'Available'}
+              {friend.isOnline ? 'Online' : 'Offline'}
             </Text>
           </View>
         </TouchableOpacity>
+
         <View style={styles.actions}>
           <TouchableOpacity
             style={[styles.actionButton, styles.chatButton]}
@@ -260,232 +303,137 @@ const FriendList = () => {
             disabled={isChatLoading}
           >
             {isChatLoading ? (
-              <ActivityIndicator color="#fff" size="small" />
+              <ActivityIndicator size="small" color="#fff" />
             ) : (
-              <Ionicons name="chatbubble" size={20} color="#fff" />
+              <Ionicons name="chatbubble-outline" size={24} color="#fff" />
             )}
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.actionButton, styles.removeButton]}
             onPress={() => handleRemoveFriend(friend)}
           >
-            <Ionicons name="close-circle" size={20} color="#fff" />
+            <Ionicons name="person-remove-outline" size={24} color="#fff" />
           </TouchableOpacity>
         </View>
       </Animated.View>
     );
   };
 
-  return (
-    <LinearGradient
-      colors={['#667eea', '#764ba2']}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
-      style={styles.container}
-    >
-      <View style={styles.header}>
-        <Text style={styles.title}>Friends</Text>
-        <TouchableOpacity
-          style={styles.addButton}
-          onPress={() => setAddModalVisible(true)}
-        >
-          <Ionicons name="person-add" size={24} color="#fff" />
-        </TouchableOpacity>
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#667eea" />
       </View>
+    );
+  }
 
-      {loading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#fff" />
-          <Text style={styles.loadingText}>Loading friends...</Text>
-        </View>
-      ) : error ? (
-        <View style={styles.errorContainer}>
-          <Ionicons name="alert-circle" size={48} color="#fff" />
-          <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity
-            style={styles.retryButton}
-            onPress={loadFriends}
-          >
-            <Text style={styles.retryButtonText}>Retry</Text>
-          </TouchableOpacity>
-        </View>
-      ) : friends.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <Ionicons name="people" size={48} color="#fff" />
-          <Text style={styles.emptyText}>No friends yet</Text>
-          <Text style={styles.emptySubtext}>
-            Add friends by their phone number to start chatting
-          </Text>
-          <TouchableOpacity
-            style={styles.addFirstButton}
-            onPress={() => setAddModalVisible(true)}
-          >
-            <Text style={styles.addFirstButtonText}>Add Friend</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        <FlatList
-          data={friends}
-          renderItem={renderFriend}
-          keyExtractor={(item) => item.uid}
-          contentContainerStyle={styles.friendsList}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              tintColor="#fff"
-            />
-          }
-        />
+  return (
+    <View style={styles.container}>
+      {error && (
+        <Text style={styles.errorText}>{error}</Text>
       )}
+
+      <FlatList
+        data={friends}
+        renderItem={renderFriend}
+        keyExtractor={item => item.uid}
+        contentContainerStyle={styles.listContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={['#667eea']}
+            tintColor="#667eea"
+          />
+        }
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <Ionicons name="people-outline" size={48} color="#667eea" />
+            <Text style={styles.emptyText}>No friends yet</Text>
+            <TouchableOpacity
+              style={styles.addButton}
+              onPress={() => setAddModalVisible(true)}
+            >
+              <Text style={styles.addButtonText}>Add Friends</Text>
+            </TouchableOpacity>
+          </View>
+        }
+      />
 
       <Modal
         visible={addModalVisible}
-        transparent
         animationType="slide"
+        transparent={true}
         onRequestClose={() => setAddModalVisible(false)}
       >
-        <View style={styles.modalOverlay}>
+        <View style={styles.modalContainer}>
           <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Add Friend</Text>
+            <Text style={styles.modalTitle}>Add Friend</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Enter phone number"
+              value={phoneNumber}
+              onChangeText={setPhoneNumber}
+              keyboardType="phone-pad"
+              autoFocus
+            />
+            <View style={styles.modalActions}>
               <TouchableOpacity
-                style={styles.closeButton}
-                onPress={() => setAddModalVisible(false)}
+                style={[styles.modalButton, styles.cancelButton]}
+                onPress={() => {
+                  setAddModalVisible(false);
+                  setPhoneNumber('');
+                }}
               >
-                <Ionicons name="close" size={24} color="#333" />
+                <Text style={styles.modalButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.addButton]}
+                onPress={handleAddFriend}
+                disabled={addingFriend}
+              >
+                {addingFriend ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.modalButtonText}>Add</Text>
+                )}
               </TouchableOpacity>
             </View>
-
-            <View style={styles.inputContainer}>
-              <Ionicons name="call" size={20} color="#666" style={styles.inputIcon} />
-              <TextInput
-                style={styles.input}
-                placeholder="Enter phone number"
-                value={phoneNumber}
-                onChangeText={setPhoneNumber}
-                keyboardType="phone-pad"
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-            </View>
-
-            <TouchableOpacity
-              style={[styles.addFriendButton, addingFriend && styles.addFriendButtonDisabled]}
-              onPress={handleAddFriend}
-              disabled={addingFriend}
-            >
-              {addingFriend ? (
-                <ActivityIndicator color="#fff" size="small" />
-              ) : (
-                <Text style={styles.addFriendButtonText}>Add Friend</Text>
-              )}
-            </TouchableOpacity>
           </View>
         </View>
       </Modal>
-    </LinearGradient>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    paddingTop: Platform.OS === 'ios' ? 60 : 40,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  addButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: '#f7f8fa',
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  loadingText: {
-    color: '#fff',
-    marginTop: 12,
-    fontSize: 16,
-  },
-  errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  errorText: {
-    color: '#fff',
-    fontSize: 16,
-    marginTop: 12,
-    textAlign: 'center',
-  },
-  retryButton: {
-    marginTop: 16,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    backgroundColor: '#fff',
-    borderRadius: 8,
-  },
-  retryButtonText: {
-    color: '#667eea',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  emptyText: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#fff',
-    marginTop: 16,
-  },
-  emptySubtext: {
-    fontSize: 16,
-    color: 'rgba(255,255,255,0.7)',
-    marginTop: 8,
-    textAlign: 'center',
-  },
-  addFirstButton: {
-    marginTop: 24,
-    paddingHorizontal: 32,
-    paddingVertical: 16,
-    backgroundColor: '#fff',
-    borderRadius: 12,
-  },
-  addFirstButtonText: {
-    color: '#667eea',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  friendsList: {
+  listContent: {
     padding: 16,
   },
   friendItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: '#fff',
     borderRadius: 12,
     padding: 12,
     marginBottom: 8,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 3,
   },
   friendInfo: {
     flex: 1,
@@ -493,9 +441,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     marginRight: 12,
   },
   friendDetails: {
@@ -504,82 +452,104 @@ const styles = StyleSheet.create({
   friendName: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#fff',
-    marginBottom: 2,
+    color: '#333',
   },
   friendStatus: {
     fontSize: 14,
-    color: 'rgba(255,255,255,0.7)',
-  },
-  removeButton: {
-    padding: 4,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalContent: {
-    width: '90%',
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 20,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#333',
-  },
-  closeButton: {
-    padding: 4,
-  },
-  inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f5f5f5',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    marginBottom: 20,
-  },
-  inputIcon: {
-    marginRight: 8,
-  },
-  input: {
-    flex: 1,
-    height: 48,
-    fontSize: 16,
-    color: '#333',
-  },
-  addFriendButton: {
-    backgroundColor: '#667eea',
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
-  addFriendButtonDisabled: {
-    opacity: 0.7,
-  },
-  addFriendButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
+    color: '#666',
+    marginTop: 2,
   },
   actions: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   actionButton: {
-    padding: 8,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
   },
   chatButton: {
-    marginRight: 8,
+    backgroundColor: '#667eea',
+  },
+  removeButton: {
+    backgroundColor: '#f44336',
+  },
+  errorText: {
+    color: '#f44336',
+    textAlign: 'center',
+    margin: 16,
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  emptyText: {
+    fontSize: 16,
+    color: '#666',
+    marginTop: 12,
+    marginBottom: 20,
+  },
+  addButton: {
+    backgroundColor: '#667eea',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  addButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  modalContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 20,
+    width: '80%',
+    maxWidth: 400,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    marginBottom: 16,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+  },
+  modalButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    marginLeft: 12,
+  },
+  cancelButton: {
+    backgroundColor: '#f44336',
+  },
+  modalButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
 

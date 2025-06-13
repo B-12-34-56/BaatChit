@@ -292,7 +292,7 @@ async function checkDuplicateAcrossDevices(fileHash, retryCount = 0) {
     }
     
     // STEP 3: Fallback - manual perceptual hash comparison
-    console.log('erforming manual perceptual hash comparison...');
+    console.log('Performing manual perceptual hash comparison...');
     const result = await performManualSimilarityCheck(fileHash);
     result.performanceMs = performance.now() - startTime;
     return result;
@@ -527,81 +527,88 @@ async function incrementUploadLog(userId, userName, fileHash, fileName) {
 
 async function uploadImageToFirebase(imageUri, userId, fileHash, imageFile) {
   try {
+    console.log('Starting Firebase upload...');
+    console.log('Image URI:', imageUri);
+    console.log('User ID:', userId);
+    console.log('File Hash:', fileHash);
+    console.log('Image File:', imageFile);
+
     const storage = getStorage();
+    
+    // FIX: Use the correct path that matches your storage rules
     const timestamp = Date.now();
+    const fileName = `${timestamp}_${fileHash.substring(0, 8)}_${imageFile.fileName || 'image.jpg'}`;
+    const path = `user_uploads/${userId}/${fileName}`;
     
-    // Debug logging
-    console.log('Upload attempt - Auth state:', {
-      userId,
-      hasAuth: !!auth.currentUser,
-      currentUserId: auth.currentUser?.uid
-    });
+    console.log('Storage path:', path);
     
-    // Fetch the image as a blob
+    const storageRef = ref(storage, path);
+    console.log('Storage reference created');
+
+    // Get blob from URI
+    console.log('Fetching image blob...');
     const response = await fetch(imageUri);
+    console.log('Fetch response status:', response.status);
+    
+    if (!response.ok) {
+      throw new Error(`Failed to fetch image: ${response.status}`);
+    }
+    
     const blob = await response.blob();
-    
-    // Determine the correct content type and file extension
-    let contentType = 'image/jpeg'; // default
-    let fileExtension = 'jpg'; // default
-    
-    // Try multiple ways to get the content type
-    if (blob.type && blob.type.includes('image/')) {
-      contentType = blob.type;
-    } else if (imageFile?.type) {
-      contentType = imageFile.type;
-    } else if (imageFile?.mimeType) {
-      contentType = imageFile.mimeType;
-    } else if (imageUri.toLowerCase().includes('.png')) {
-      contentType = 'image/png';
-    }
-    
-    // Set the correct file extension
-    if (contentType === 'image/png') {
-      fileExtension = 'png';
-    } else if (contentType === 'image/jpeg' || contentType === 'image/jpg') {
-      fileExtension = 'jpg';
-    }
-    
-    // Create filename with correct extension
-    const fileName = `image_${timestamp}_${fileHash.substring(0, 8)}.${fileExtension}`;
-    const storageRef = ref(storage, `user_uploads/${userId}/${fileName}`);
-    
-    // Debug logging for file type
-    console.log('File info:', {
-      originalType: imageFile?.type,
-      blobType: blob.type,
-      detectedContentType: contentType,
-      fileExtension: fileExtension,
-      fileName: fileName,
-      size: blob.size
+    console.log('Blob created:', {
+      size: blob.size,
+      type: blob.type
     });
-    
-    // Upload with metadata
+
+    // Validate blob
+    if (!blob || blob.size === 0) {
+      throw new Error('Invalid blob: empty or null');
+    }
+
+    // Set proper metadata
     const metadata = {
-      contentType: contentType,
+      contentType: blob.type || 'image/jpeg',
       customMetadata: {
         fileHash: fileHash,
+        originalFileName: imageFile.fileName || 'unknown',
         uploadTimestamp: timestamp.toString(),
-        tag: 'original'
+        userId: userId
       }
     };
+
+    console.log('Upload metadata:', metadata);
+
+    // Upload blob with metadata
+    console.log('Uploading to Firebase...');
+    const snapshot = await uploadBytes(storageRef, blob, metadata);
+    console.log('Upload completed:', {
+      bytesTransferred: snapshot.metadata.size,
+      fullPath: snapshot.metadata.fullPath
+    });
     
-    console.log('Uploading with metadata:', metadata);
-    console.log('Storage path:', `user_uploads/${userId}/${fileName}`);
+    const downloadURL = await getDownloadURL(snapshot.ref);
+    console.log('Download URL obtained:', downloadURL);
     
-    await uploadBytes(storageRef, blob, metadata);
-    const downloadURL = await getDownloadURL(storageRef);
-    
-    console.log('Upload successful, download URL:', downloadURL);
     return downloadURL;
   } catch (error) {
-    console.error('Error uploading to Firebase:', error);
-    console.error('Error details:', {
+    console.error('Detailed Firebase upload error:', {
       code: error.code,
       message: error.message,
-      serverResponse: error.serverResponse
+      serverResponse: error.serverResponse,
+      stack: error.stack,
+      customData: error.customData
     });
+    
+    // Provide more specific error messages
+    if (error.code === 'storage/unauthorized') {
+      throw new Error('Unauthorized: Check authentication and storage rules');
+    } else if (error.code === 'storage/canceled') {
+      throw new Error('Upload was canceled');
+    } else if (error.code === 'storage/unknown') {
+      // This often means path doesn't match storage rules
+      throw new Error('Storage error: Check if path matches storage rules');
+    }
+    
     throw error;
   }
 }
@@ -644,6 +651,7 @@ const MessageInput = () => {
   const [hasPermission, setHasPermission] = useState(false);
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
   const [duplicateModalData, setDuplicateModalData] = useState(null);
+  const [forceUpdate, setForceUpdate] = useState(false);
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -657,6 +665,11 @@ const MessageInput = () => {
     };
   }, []);
 
+  // Add useEffect to monitor imageUri changes
+  useEffect(() => {
+    console.log('imageUri changed:', imageUri);
+  }, [imageUri]);
+
   const handleImagePick = async () => {
     if (!hasPermission) {
       Alert.alert('Permission Required', 'Permission to access gallery is required!');
@@ -665,17 +678,21 @@ const MessageInput = () => {
 
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ImagePicker.MediaTypeOptions.images,
         allowsEditing: false,
         quality: 1,
       });
 
       if (!result.canceled && result.assets && result.assets[0]) {
         const asset = result.assets[0];
+        console.log('Selected image asset:', asset);
         if (mounted.current) {
+          console.log('Setting image URI to:', asset.uri);
           setImageUri(asset.uri);
           setImageFile(asset);
           setDuplicateWarning('');
+          // Force a re-render
+          setForceUpdate(prev => !prev);
         }
       }
     } catch (error) {
@@ -1129,6 +1146,7 @@ const MessageInput = () => {
     <KeyboardAvoidingView
       behavior={Platform.OS === "ios" ? "padding" : "height"}
       style={styles.container}
+      key={forceUpdate ? 'force-update' : 'normal'}
     >
       {/* Add the debug buttons */}
       {__DEV__ && (
@@ -1202,7 +1220,16 @@ const MessageInput = () => {
       
       {imageUri && (
         <View style={styles.imagePreview}>
-          <Image source={{ uri: imageUri }} style={styles.previewImage} />
+          <Image 
+            source={{ uri: imageUri }} 
+            style={styles.previewImage}
+            onError={(e) => {
+              console.error('Image loading error:', e.nativeEvent.error);
+              console.error('Failed URI:', imageUri);
+            }}
+            onLoad={() => console.log('Image loaded successfully:', imageUri)}
+            resizeMode="cover"
+          />
           <View style={styles.imageInfo}>
             <Text style={styles.imageFileName}>
               {imageFile?.fileName || 'image.jpg'}

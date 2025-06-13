@@ -37,7 +37,7 @@ export const uploadImage = async (path) => {
 
     // Launch image picker
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ImagePicker.MediaTypeOptions.images,
       allowsEditing: true,
       quality: 0.8,
       base64: true,

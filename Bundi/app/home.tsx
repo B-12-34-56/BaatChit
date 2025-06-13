@@ -1,19 +1,23 @@
-// Home.jsx - React Native version
+// Home.tsx
 import React, { useState, useContext } from 'react';
 import { View, Dimensions, TouchableOpacity, Text, ActivityIndicator } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+
+// Import components from the correct paths
 import Navbar from '../src/components/Navbar';
 import Sidebar from '../src/components/Sidebar';
 import Chats from '../src/components/Chats';
 import Chat from '../src/components/Chat';
-import { ChatContextProvider, ChatContext } from '../src/context/ChatContext'; // Import the real provider
-import { Ionicons } from '@expo/vector-icons';
+import { ChatContextProvider, ChatContext } from '../src/context/ChatContext';
 
 const { width, height } = Dimensions.get('window');
 
 const Home = () => {
   const [activeView, setActiveView] = useState('friends'); // 'friends' or 'chats'
+  const router = useRouter();
 
   return (
     <ChatContextProvider>
