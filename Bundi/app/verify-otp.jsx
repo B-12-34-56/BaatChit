@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { registerAndLoginWithPhone } from '../src/services/authService';
+import authService from '../src/services/authService';
 
 const OTP_EXPIRY = 300000; // 5 minutes
 const MAX_ATTEMPTS = 3;
@@ -86,8 +86,9 @@ export default function VerifyOTP() {
 
       setIsLoading(true);
       
-      // Register and login with phone
-      const result = await registerAndLoginWithPhone(phoneNumber, code);
+      // Add debug logging before the verifyOTP call
+      console.log('authService =', authService);
+      const result = await authService.verifyOTP(phoneNumber, code);
       
       if (!result.user) {
         throw new Error('Failed to create user account');

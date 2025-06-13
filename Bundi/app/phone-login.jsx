@@ -16,6 +16,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth } from '../src/utils/firebase';
 import { PhoneAuthProvider, signInWithCredential } from 'firebase/auth';
+import authService from '../src/services/authService';
 
 const RATE_LIMIT_WINDOW = 60000; // 1 minute
 const MAX_ATTEMPTS = 3;
@@ -178,7 +179,9 @@ export default function PhoneLogin() {
         return;
       }
 
-      const result = await registerAndLoginWithPhone(phoneNumber, otp);
+      // Add debug logging before the verifyOTP call
+      console.log('authService =', authService);
+      const result = await authService.verifyOTP(phoneNumber, otp);
       
       if (result.verified) {
         // Navigate to the main app

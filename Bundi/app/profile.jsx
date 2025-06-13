@@ -27,7 +27,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { authService } from '../src/services/authService';
+import authService from '../src/services/authService';
 
 const MAX_NAME_LENGTH = 50;
 const MAX_EMAIL_LENGTH = 100;

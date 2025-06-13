@@ -1,303 +1,170 @@
-import { 
-  createUserWithEmailAndPassword, 
-  signInWithEmailAndPassword,
-  signInWithPhoneNumber,
-  PhoneAuthProvider,
-  RecaptchaVerifier,
-  signInAnonymously
-} from 'firebase/auth';
-import { auth, db } from '../utils/firebase';
-import { 
-  collection, 
-  doc, 
-  setDoc, 
-  getDoc, 
-  getDocs 
-} from 'firebase/firestore';
-import { httpsCallable, getFunctions } from 'firebase/functions';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { TwilioService } from '../utils/twilio';
-import { createUserDocument } from './userService';
+import { 
+  getAuth, 
+  signInWithCredential, 
+  PhoneAuthProvider,
+  signOut, 
+  onAuthStateChanged as onFirebaseAuthStateChanged,
+  RecaptchaVerifier
+} from 'firebase/auth';
+import { app } from '../utils/firebase';
 
-const firebaseFunctions = getFunctions();
+const auth = getAuth();
 
-export async function register(email, password, displayName) {
-  try {
-    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-    const user = userCredential.user;
-    
-    // Create user document in Firestore
-    await createUserDocument(user.uid, {
-      email,
-      displayName,
-      createdAt: new Date().toISOString()
-    });
-    
-    return user;
-  } catch (error) {
-    console.error('Error registering user:', error);
-    throw error;
-  }
+/**
+ * Normalize a phone number to E.164 format (e.g. "+15551234567")
+ */
+function formatPhoneNumber(phone) {
+  let cleaned = phone.replace(/[^\d+]/g, '');
+  if (!cleaned.startsWith('+')) cleaned = `+${cleaned}`;
+  console.log('Formatted phone number:', cleaned);
+  return cleaned;
 }
 
-export async function login(email, password) {
-  try {
-    const userCredential = await signInWithEmailAndPassword(auth, email, password);
-    return userCredential.user;
-  } catch (error) {
-    console.error('Error logging in:', error);
-    throw error;
-  }
-}
-
-export const registerAndLoginWithPhone = async (phoneNumber, otpCode) => {
-  try {
-    console.log('Starting phone authentication process...');
-    console.log('Verifying OTP with Twilio...');
-    
-    // Step 1: Verify OTP with Twilio
-    const verificationResult = await TwilioService.verifyOTP(phoneNumber, otpCode);
-    console.log('Twilio verification result:', verificationResult);
-    
-    if (!verificationResult.valid) {
-      throw new Error('Invalid verification code');
-    }
-
-    console.log('Phone number verified successfully:', phoneNumber);
-
-    // Step 2: Get custom token from your backend
-    console.log('Attempting to fetch custom token...');
-    let customToken;
-    try {
-      customToken = await getCustomTokenFromBackend(phoneNumber);
-      console.log('Successfully received custom token');
-    } catch (tokenError) {
-      console.error('Failed to get custom token:', tokenError);
-      
-      // For development/testing, create a temporary user with email/password
-      console.log('Creating temporary user for development...');
-      const tempEmail = `${phoneNumber.replace(/[^0-9]/g, '')}@temp.baatchit.com`;
-      const tempPassword = Math.random().toString(36).slice(-8);
-      
-      try {
-        const tempCredential = await createUserWithEmailAndPassword(auth, tempEmail, tempPassword);
-        const tempUser = tempCredential.user;
-        
-        // Create a temporary user document
-        const userDocRef = doc(db, 'users', tempUser.uid);
-        await setDoc(userDocRef, {
-          uid: tempUser.uid,
-          phoneNumber: phoneNumber,
-          displayName: phoneNumber,
-          avatar: null,
-          createdAt: serverTimestamp(),
-          lastLogin: serverTimestamp(),
-          isActive: true,
-          friends: [],
-          friendRequests: [],
-          isTemporary: true,
-          email: tempEmail
-        });
-        
-        console.log('Temporary user document created');
-        return { 
-          user: tempUser, 
-          phoneNumber, 
-          isVerified: true,
-          isTemporary: true 
-        };
-      } catch (tempUserError) {
-        console.error('Failed to create temporary user:', tempUserError);
-        // If user already exists, try to sign in
-        try {
-          const signInCredential = await signInWithEmailAndPassword(auth, tempEmail, tempPassword);
-          const existingUser = signInCredential.user;
-          
-          // Update last login
-          const userDocRef = doc(db, 'users', existingUser.uid);
-          await setDoc(userDocRef, {
-            lastLogin: serverTimestamp(),
-            isActive: true
-          }, { merge: true });
-          
-          return {
-            user: existingUser,
-            phoneNumber,
-            isVerified: true,
-            isTemporary: true
-          };
-        } catch (signInError) {
-          console.error('Failed to sign in with temporary account:', signInError);
-          throw new Error('Failed to create or sign in with temporary account. Please try again.');
-        }
-      }
-    }
-
-    // Step 3: Sign in with the custom token
-    console.log('Signing in with custom token...');
-    const userCredential = await signInWithCustomToken(auth, customToken);
-    const user = userCredential.user;
-    console.log('Successfully signed in with custom token');
-
-    // Step 4: Check if user document exists
-    const userDocRef = doc(db, 'users', user.uid);
-    const userDoc = await getDoc(userDocRef);
-
-    if (!userDoc.exists()) {
-      // Step 5: Create new user document for first-time users
-      await setDoc(userDocRef, {
-        uid: user.uid,
-        phoneNumber: phoneNumber,
-        displayName: phoneNumber,
-        avatar: null,
-        createdAt: serverTimestamp(),
-        lastLogin: serverTimestamp(),
-        isActive: true,
-        friends: [],
-        friendRequests: [],
-      });
-      console.log('User document created successfully');
-    } else {
-      // Step 6: Update existing user's last login
-      await setDoc(userDocRef, {
-        ...userDoc.data(),
-        lastLogin: serverTimestamp(),
-        isActive: true,
-      });
-      console.log('User document updated successfully');
-    }
-
-    // Store verified phone number
-    await AsyncStorage.setItem('phoneNumber', phoneNumber);
-    
-    console.log('Phone authentication completed successfully');
-    return { user, phoneNumber, isVerified: true };
-  } catch (error) {
-    console.error('Phone authentication error:', error);
-    if (error.message.includes('VerificationCheck was not found')) {
-      throw new Error('Verification service is not properly configured. Please contact support.');
-    }
-    throw error;
-  }
-};
-
-// Helper function to get custom token from your backend
-const getCustomTokenFromBackend = async (phoneNumber) => {
-  try {
-    console.log('Fetching custom token from backend...');
-    // Replace with your actual backend endpoint
-    const response = await Promise.race([
-      fetch('https://verify.twilio.com/v2/Services/VA87818ecf299afe43e5422c2986cf0c1f/Verifications', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ phoneNumber }),
-      }),
-      new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Backend request timeout')), 5000)
-      )
-    ]);
-    
-    if (!response.ok) {
-      throw new Error(`Backend responded with status: ${response.status}`);
-    }
-    
-    const data = await response.json();
-    if (!data.customToken) {
-      throw new Error('Backend response missing customToken');
-    }
-    return data.customToken;
-  } catch (error) {
-    console.error('Error getting custom token:', error);
-    throw error;
-  }
-};
-
-// Add a function to request phone verification code
-export const requestPhoneVerification = async (phoneNumber) => {
-  try {
-    console.log('Requesting phone verification code...');
-    const requestPhoneCode = httpsCallable(firebaseFunctions, 'requestPhoneCode');
-    
-    const result = await requestPhoneCode({
-      phoneNumber
-    });
-    
-    console.log('Phone verification code requested:', result.data);
-    return result.data;
-  } catch (error) {
-    console.error('Error requesting phone verification:', error);
-    throw error;
-  }
-};
-
-export async function logout() {
-  try {
-    await signOut(auth);
-  } catch (error) {
-    console.error('Logout error:', error);
-    throw error;
-  }
-}
-
-export const authService = {
-  // Send OTP to phone number
+const authService = {
+  /**
+   * Send an OTP via Firebase
+   * @param {string} phoneNumber — raw or E.164-format
+   * @returns {Promise<string>} verificationId
+   */
   sendOTP: async (phoneNumber) => {
+    const e164 = formatPhoneNumber(phoneNumber);
     try {
-      const sendVerification = httpsCallable(firebaseFunctions, 'sendVerification');
-      const result = await sendVerification({ phoneNumber });
-      return result.data;
+      console.log('Sending OTP to:', e164);
+      
+      // Clear any existing verification data
+      await AsyncStorage.removeItem('confirmationResult');
+      
+      // Create a new reCAPTCHA verifier
+      const recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
+        size: 'invisible',
+        callback: () => {
+          console.log('reCAPTCHA verified');
+        }
+      });
+
+      // Send verification code
+      const confirmationResult = await auth.signInWithPhoneNumber(e164, recaptchaVerifier);
+      console.log('Verification code sent successfully');
+      
+      // Store the confirmation result
+      const verificationData = {
+        phoneNumber: e164,
+        verificationId: confirmationResult.verificationId,
+        timestamp: Date.now()
+      };
+      
+      await AsyncStorage.setItem('confirmationResult', JSON.stringify(verificationData));
+      console.log('Stored verification data:', verificationData);
+      
+      return confirmationResult.verificationId;
     } catch (error) {
       console.error('Error sending OTP:', error);
-      throw error;
+      // Clear any partial verification data
+      await AsyncStorage.removeItem('confirmationResult');
+      throw new Error(`Failed to send OTP: ${error.message}`);
     }
   },
 
-  // Verify OTP and sign in
+  /**
+   * Verify the OTP code and sign in with Firebase
+   * @param {string} phoneNumber — must match the one used in sendOTP()
+   * @param {string} code — 6-digit verification code
+   * @returns {Promise<import('firebase/auth').UserCredential.user>}
+   */
   verifyOTP: async (phoneNumber, code) => {
+    const e164 = formatPhoneNumber(phoneNumber);
     try {
-      // First verify the OTP with Twilio
-      const verificationResult = await TwilioService.verifyOTP(phoneNumber, code);
+      console.log('Verifying OTP for:', e164);
       
-      if (verificationResult.valid) {
-        // Get the custom token from our Cloud Function
-        const verifyPhoneAndCreateToken = httpsCallable(firebaseFunctions, 'verifyPhoneAndCreateToken');
-        const result = await verifyPhoneAndCreateToken({ phoneNumber });
-        
-        // Sign in with the custom token
-        await auth.signInWithCustomToken(result.data.customToken);
-        
-        return {
-          success: true,
-          user: result.data
-        };
-      } else {
-        throw new Error('Invalid verification code');
+      // Get the stored confirmation result
+      const storedData = await AsyncStorage.getItem('confirmationResult');
+      console.log('Retrieved stored data:', storedData);
+      
+      if (!storedData) {
+        throw new Error('No verification in progress. Please request a new code.');
       }
+
+      const verificationData = JSON.parse(storedData);
+      console.log('Parsed verification data:', verificationData);
+
+      // Check if verification has expired (15 minutes)
+      const now = Date.now();
+      const verificationAge = now - verificationData.timestamp;
+      if (verificationAge > 15 * 60 * 1000) { // 15 minutes in milliseconds
+        await AsyncStorage.removeItem('confirmationResult');
+        throw new Error('Verification code expired. Please request a new code.');
+      }
+
+      if (verificationData.phoneNumber !== e164) {
+        console.error('Phone number mismatch:', {
+          stored: verificationData.phoneNumber,
+          current: e164
+        });
+        throw new Error('Phone number mismatch. Please start verification again.');
+      }
+
+      // Get Firebase phone auth credential
+      const credential = PhoneAuthProvider.credential(
+        verificationData.verificationId,
+        code
+      );
+
+      // Sign in with the credential
+      const userCredential = await signInWithCredential(auth, credential);
+      console.log('Successfully signed in with Firebase:', userCredential.user.uid);
+      
+      // Store user ID
+      await AsyncStorage.setItem('uid', userCredential.user.uid);
+      
+      // Clear verification data only after successful sign in
+      await AsyncStorage.removeItem('confirmationResult');
+      console.log('Cleared verification data after successful sign in');
+      
+      return userCredential.user;
     } catch (error) {
-      console.error('Error verifying OTP:', error);
-      throw error;
+      console.error('Error verifying OTP & signing in:', error);
+      if (error.code === 'auth/invalid-verification-code') {
+        throw new Error('Invalid verification code. Please try again.');
+      } else if (error.code === 'auth/invalid-verification-id') {
+        await AsyncStorage.removeItem('confirmationResult');
+        throw new Error('Verification expired. Please request a new code.');
+      }
+      throw new Error(`Authentication failed: ${error.message}`);
     }
   },
 
-  // Sign out
-  signOut: async () => {
+  /**
+   * Sign the current user out
+   */
+  logout: async () => {
     try {
-      await auth.signOut();
+      await signOut(auth);
+      await AsyncStorage.removeItem('uid');
+      await AsyncStorage.removeItem('confirmationResult');
+      console.log('Cleared all auth data during logout');
     } catch (error) {
       console.error('Error signing out:', error);
-      throw error;
+      throw new Error(`Failed to sign out: ${error.message}`);
     }
   },
 
-  // Get current user
+  /**
+   * Get the currently signed-in user
+   * @returns {import('firebase/auth').User | null}
+   */
   getCurrentUser: () => {
     return auth.currentUser;
   },
 
-  // Listen to auth state changes
+  /**
+   * Subscribe to Firebase auth state changes
+   * @param {(user: import('firebase/auth').User | null) => void} callback
+   * @returns {() => void} unsubscribe function
+   */
   onAuthStateChanged: (callback) => {
-    return auth.onAuthStateChanged(callback);
-  }
+    return onFirebaseAuthStateChanged(auth, callback);
+  },
 };
+
+export default authService;
