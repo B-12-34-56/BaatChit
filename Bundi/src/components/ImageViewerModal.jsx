@@ -96,7 +96,6 @@ const ImageViewerModal = ({ visible, imageUrl, onClose }) => {
                   source={{ uri: imageUrl }}
                   style={[styles.image, animatedStyle]}
                   resizeMode="contain"
-                  onError={(e) => console.error('Modal image loading error:', e.nativeEvent.error)}
                 />
               </TouchableOpacity>
             </Animated.View>
