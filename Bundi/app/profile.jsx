@@ -16,25 +16,24 @@ import {
   Keyboard,
   TouchableWithoutFeedback,
 } from "react-native";
-import { db, storage } from "../src/utils/firebase";
 import { doc, updateDoc } from "firebase/firestore";
-import { updateProfile } from "firebase/auth";
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
+import { updateProfile } from "firebase/auth";
 import { useRouter } from "expo-router";
-import { useAuthState } from 'react-firebase-hooks/auth';
-import { auth } from '../src/utils/firebase.js';
+import { auth, db, storage } from "../src/utils/firebase";
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import authService from '../src/services/authService';
+import { useAuthState } from 'react-firebase-hooks/auth';
 
 const MAX_NAME_LENGTH = 50;
 const MAX_EMAIL_LENGTH = 100;
 const MAX_BIO_LENGTH = 200;
 
-const Profile = () => {
-  const [currentUser] = useAuthState(auth);
+export default function Profile() {
+  const [user] = useAuthState(auth);
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [photoURL, setPhotoURL] = useState("");
@@ -53,13 +52,13 @@ const Profile = () => {
   const router = useRouter();
 
   useEffect(() => {
-    if (currentUser) {
-      setDisplayName(currentUser.displayName || "");
-      setEmail(currentUser.email || "");
-      setPhotoURL(currentUser.photoURL || "");
+    if (user) {
+      setDisplayName(user.displayName || "");
+      setEmail(user.email || "");
+      setPhotoURL(user.photoURL || "");
     }
     loadProfile();
-  }, [currentUser]);
+  }, [user]);
 
   const validateEmail = (email) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -96,15 +95,23 @@ const Profile = () => {
   const loadProfile = async () => {
     try {
       setLoading(true);
+      if (!user?.uid) {
+        throw new Error('No user found');
+      }
+      
       const phoneNumber = await AsyncStorage.getItem('phoneNumber');
-      const userProfile = await authService.getUserProfile();
+      const userProfile = await authService.getUserProfile(user.uid);
       
       setProfile({
-        name: userProfile?.name || '',
+        name: userProfile?.displayName || '',
         email: userProfile?.email || '',
         phoneNumber: phoneNumber || '',
         bio: userProfile?.bio || '',
       });
+      
+      // Also update the display name and photo URL states
+      setDisplayName(userProfile?.displayName || '');
+      setPhotoURL(userProfile?.photoURL || '');
     } catch (error) {
       console.error('Error loading profile:', error);
       Alert.alert('Error', 'Failed to load profile. Please try again.');
@@ -150,7 +157,7 @@ const Profile = () => {
       const response = await fetch(uri);
       const blob = await response.blob();
       
-      const storageRef = ref(storage, `avatars/${currentUser.uid}_${Date.now()}`);
+      const storageRef = ref(storage, `avatars/${user.uid}_${Date.now()}`);
       const uploadTask = uploadBytesResumable(storageRef, blob);
       
       return new Promise((resolve, reject) => {
@@ -190,13 +197,13 @@ const Profile = () => {
       }
       
       // Update Firebase Auth profile
-      await updateProfile(currentUser, {
+      await updateProfile(user, {
         displayName: profile.name,
         photoURL: newPhotoURL,
       });
       
       // Update Firestore user document
-      await updateDoc(doc(db, "users", currentUser.uid), {
+      await updateDoc(doc(db, "users", user.uid), {
         displayName: profile.name,
         photoURL: newPhotoURL,
         email: profile.email,
@@ -401,7 +408,7 @@ const Profile = () => {
       </KeyboardAvoidingView>
     </LinearGradient>
   );
-};
+}
 
 const styles = StyleSheet.create({
   container: {
@@ -537,6 +544,4 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-});
-
-export default Profile; 
+}); 

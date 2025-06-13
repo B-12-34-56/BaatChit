@@ -1,54 +1,32 @@
 import { Stack } from 'expo-router';
 import { View, ActivityIndicator } from 'react-native';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect } from 'react';
 import { useRouter, useSegments } from 'expo-router';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { auth } from '../src/utils/firebase';
+import { useAuthState } from 'react-firebase-hooks/auth';
+import { AuthProvider } from '../src/contexts/AuthContext';
 
-export default function RootLayoutNav() {
-  const [isLoading, setIsLoading] = useState(true);
-  const [user, setUser] = useState(null);
+const RootLayoutNav = () => {
+  const [user, loading] = useAuthState(auth);
   const router = useRouter();
   const segments = useSegments();
-  const navigationRef = useRef(false); // Prevent multiple navigations
 
   useEffect(() => {
-    checkAuth();
-  }, []);
-
-  const checkAuth = async () => {
-    try {
-      const session = await AsyncStorage.getItem('authSession');
-      if (session) {
-        const { phoneNumber } = JSON.parse(session);
-        setUser({ uid: phoneNumber, phoneNumber });
-      }
-    } catch (error) {
-      console.error('Auth check error:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    // Only navigate once after initial load
-    if (!isLoading && !navigationRef.current) {
+    if (!loading) {
       const inAuthGroup = segments[0] === '(auth)';
-      const currentRoute = segments.join('/');
+      const isVerifyOTP = segments[segments.length - 1] === 'verify-otp';
       
-      if (!user && !inAuthGroup && currentRoute !== 'phone-login') {
+      if (!user && !inAuthGroup && !isVerifyOTP) {
         // Redirect to the sign-in page
-        navigationRef.current = true;
         router.replace('/phone-login');
-      } else if (user && inAuthGroup && currentRoute !== 'home') {
+      } else if (user && inAuthGroup && !isVerifyOTP) {
         // Redirect away from the sign-in page
-        navigationRef.current = true;
         router.replace('/home');
       }
     }
-  }, [user, isLoading]); // Remove segments from dependencies
+  }, [user, loading, segments]);
 
-  if (isLoading) {
+  if (loading) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
         <ActivityIndicator size="large" color="#007AFF" />
@@ -67,22 +45,19 @@ export default function RootLayoutNav() {
       <Stack.Screen
         name="phone-login"
         options={{
-          headerShown: false,
-          title: 'Phone Login'
+          headerShown: false
         }}
       />
       <Stack.Screen
         name="verify-otp"
         options={{
-          headerShown: false,
-          title: 'Verify OTP'
+          headerShown: false
         }}
       />
       <Stack.Screen
         name="home"
         options={{
-          headerShown: false,
-          title: 'Home'
+          headerShown: false
         }}
       />
       <Stack.Screen
@@ -101,4 +76,14 @@ export default function RootLayoutNav() {
       />
     </Stack>
   );
-}
+};
+
+const RootLayout = () => {
+  return (
+    <AuthProvider>
+      <RootLayoutNav />
+    </AuthProvider>
+  );
+};
+
+export default RootLayout;

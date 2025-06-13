@@ -1,37 +1,50 @@
-import React, { useState } from 'react';
-import { View, TextInput, Button, StyleSheet, Text } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { router } from 'expo-router';
-import { authService } from '../services/authService';
+import { getAuth, onAuthStateChanged } from 'firebase/auth';
+import { app } from '../utils/firebase';
+import authService from '../services/authService';
+import { useAuth } from '../contexts/AuthContext';
 
-export default function PhoneLoginScreen() {
+const auth = getAuth(app);
+
+export default function PhoneLogin() {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const { setUser } = useAuth();
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        setUser(user);
+        router.replace('/home');
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   const handleSendOTP = async () => {
+    if (!phoneNumber) {
+      Alert.alert('Error', 'Please enter a phone number');
+      return;
+    }
+
     try {
       setLoading(true);
-      setError('');
+      const formattedPhone = phoneNumber.startsWith('+') ? phoneNumber : `+${phoneNumber}`;
+      const result = await authService.sendOTP(formattedPhone);
       
-      console.log('[PhoneLoginScreen] Sending OTP to:', phoneNumber);
-      const result = await authService.sendOTP(phoneNumber);
-      console.log('[PhoneLoginScreen] OTP sent successfully:', result);
-      
-      // Navigate to verify OTP screen with session data
-      const params = {
-        phoneNumber: result.phoneNumber,
-        verificationSid: result.sid,
-        timestamp: Date.now()
-      };
-      
-      console.log('[PhoneLoginScreen] Navigating with params:', params);
       router.push({
         pathname: '/verify-otp',
-        params
+        params: {
+          phoneNumber: result.phoneNumber,
+          verificationSid: result.verificationSid
+        }
       });
     } catch (error) {
-      console.error('[PhoneLoginScreen] Error:', error);
-      setError(error.message);
+      console.error('Error sending OTP:', error);
+      Alert.alert('Error', error.message || 'Failed to send OTP. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -39,22 +52,29 @@ export default function PhoneLoginScreen() {
 
   return (
     <View style={styles.container}>
+      <Text style={styles.title}>Enter Phone Number</Text>
+      <Text style={styles.subtitle}>We'll send you a verification code</Text>
+      
       <TextInput
         style={styles.input}
-        placeholder="Enter phone number"
+        placeholder="Phone Number (e.g. +1234567890)"
         value={phoneNumber}
         onChangeText={setPhoneNumber}
         keyboardType="phone-pad"
-        editable={!loading}
+        autoComplete="tel"
       />
-      
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-      
-      <Button
-        title={loading ? 'Sending...' : 'Send OTP'}
+
+      <TouchableOpacity 
+        style={[styles.button, loading && styles.buttonDisabled]}
         onPress={handleSendOTP}
-        disabled={loading || !phoneNumber}
-      />
+        disabled={loading}
+      >
+        {loading ? (
+          <ActivityIndicator color="#fff" />
+        ) : (
+          <Text style={styles.buttonText}>Send OTP</Text>
+        )}
+      </TouchableOpacity>
     </View>
   );
 }
@@ -63,17 +83,41 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     padding: 20,
-    justifyContent: 'center'
+    justifyContent: 'center',
+    backgroundColor: '#fff',
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  subtitle: {
+    fontSize: 16,
+    color: '#666',
+    marginBottom: 30,
+    textAlign: 'center',
   },
   input: {
     borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 5,
-    padding: 10,
-    marginBottom: 20
+    borderColor: '#ddd',
+    padding: 15,
+    borderRadius: 8,
+    marginBottom: 20,
+    fontSize: 16,
   },
-  error: {
-    color: 'red',
-    marginBottom: 10
-  }
+  button: {
+    backgroundColor: '#007AFF',
+    padding: 15,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  buttonDisabled: {
+    backgroundColor: '#ccc',
+  },
+  buttonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
 }); 

@@ -1,30 +1,42 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { 
   getAuth, 
-  signInAnonymously,
   signOut, 
-  onAuthStateChanged as onFirebaseAuthStateChanged
+  onAuthStateChanged as onFirebaseAuthStateChanged,
+  signInWithCustomToken
 } from 'firebase/auth';
-import { doc, setDoc, getFirestore, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, getFirestore, serverTimestamp, getDoc } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { app } from '../utils/firebase';
-import { sendOTP, verifyOTP } from '../utils/twilio';
-import VerificationManager from './verificationManager';
 
-const auth = getAuth();
+const auth = getAuth(app);
 const db = getFirestore(app);
+const functions = getFunctions(app);
 
 /**
  * Normalize a phone number to E.164 format (e.g. "+15551234567")
  */
 function formatPhoneNumber(phone) {
-  let cleaned = phone.replace(/[^\d+]/g, '');
-  if (!cleaned.startsWith('+')) cleaned = `+${cleaned}`;
-  return cleaned;
+  // Remove all non-digit characters
+  let cleaned = phone.replace(/\D/g, '');
+  
+  // If the number starts with 1, remove it (we'll add it back)
+  if (cleaned.startsWith('1')) {
+    cleaned = cleaned.substring(1);
+  }
+  
+  // Ensure the number is 10 digits (US format)
+  if (cleaned.length !== 10) {
+    throw new Error('Phone number must be 10 digits');
+  }
+  
+  // Add +1 prefix for US numbers
+  return `+1${cleaned}`;
 }
 
 const authService = {
   /**
-   * Send OTP to phone number
+   * Send OTP to phone number using Firebase Cloud Function
    * @param {string} phoneNumber - The phone number to send OTP to
    * @returns {Promise<{sid: string, phoneNumber: string}>} - The verification session
    */
@@ -33,26 +45,19 @@ const authService = {
       console.log('[AuthService] Sending OTP to:', phoneNumber);
       
       // Format phone number to E.164
-      const formattedPhone = phoneNumber.startsWith('+') ? phoneNumber : `+${phoneNumber}`;
+      const formattedPhone = formatPhoneNumber(phoneNumber);
       console.log('[AuthService] Formatted phone:', formattedPhone);
       
-      // Send OTP via Twilio
-      const result = await sendOTP(formattedPhone);
-      console.log('[AuthService] Twilio response:', result);
+      // Call Firebase Cloud Function
+      const initiateVerification = httpsCallable(functions, 'initiatePhoneVerification');
+      const result = await initiateVerification({ phoneNumber: formattedPhone });
       
-      // Store verification session
-      const session = {
-        phoneNumber: formattedPhone,
-        sid: result.sid,
-        timestamp: Date.now()
-      };
-      
-      console.log('[AuthService] Storing session:', session);
-      await VerificationManager.storeSession(session);
+      console.log('[AuthService] Verification initiated:', result.data);
       
       return {
-        sid: result.sid,
-        phoneNumber: formattedPhone
+        sid: result.data.verificationSid,
+        phoneNumber: result.data.phoneNumber,
+        verificationSid: result.data.verificationSid
       };
     } catch (error) {
       console.error('[AuthService] Error sending OTP:', error);
@@ -61,57 +66,48 @@ const authService = {
   },
 
   /**
-   * Verify OTP and sign in user
+   * Verify OTP and authenticate with Firebase using custom token
    * @param {string} code - The OTP code to verify
-   * @param {Object} routeParams - The route parameters containing verification session
+   * @param {Object} session - The verification session
    * @returns {Promise<Object>} - The user data
    */
-  verifyOTP: async (code, routeParams) => {
+  verifyOTP: async (code, session) => {
     try {
-      console.log('[AuthService] Verifying OTP with params:', { code, routeParams });
+      console.log('[AuthService] Verifying OTP with session:', session);
       
-      // Get verification session from route params or storage
-      const session = await VerificationManager.getSession(routeParams);
-      console.log('[AuthService] Retrieved session:', session);
-      
-      if (!session || !VerificationManager.validateSession(session)) {
-        console.error('[AuthService] Invalid session:', {
-          hasSession: !!session,
-          sessionData: session
-        });
-        throw new Error('Invalid or expired verification session');
+      if (!session.phoneNumber || !session.verificationSid || !code) {
+        throw new Error('Missing required fields: phoneNumber, code, or verificationSid');
       }
       
-      // Verify OTP with Twilio
-      console.log('[AuthService] Verifying with Twilio:', {
+      // Call Firebase Cloud Function
+      const verifyPhone = httpsCallable(functions, 'verifyPhoneAndCreateToken');
+      const result = await verifyPhone({
         phoneNumber: session.phoneNumber,
-        code
+        code: code,
+        verificationSid: session.verificationSid
       });
-      await verifyOTP(session.phoneNumber, code);
       
-      // Sign in anonymously
-      console.log('[AuthService] Signing in anonymously');
-      const userCredential = await signInAnonymously(auth);
-      const user = userCredential.user;
-      console.log('[AuthService] Anonymous sign in successful:', user.uid);
-      
-      // Create or update user document
-      const userRef = doc(db, 'users', user.uid);
-      console.log('[AuthService] Updating user document');
-      await setDoc(userRef, {
-        phoneNumber: session.phoneNumber,
-        lastVerified: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      }, { merge: true });
-      
-      // Clear verification session
-      console.log('[AuthService] Clearing verification session');
-      await VerificationManager.clearSession();
-      
-      return {
-        uid: user.uid,
-        phoneNumber: session.phoneNumber
-      };
+      if (result.data.success && result.data.customToken) {
+        // Sign in with custom token
+        const userCredential = await signInWithCustomToken(auth, result.data.customToken);
+        console.log('[AuthService] Authentication successful:', userCredential.user);
+        
+        // Update user document in Firestore
+        const userRef = doc(db, 'users', userCredential.user.uid);
+        await setDoc(userRef, {
+          phoneNumber: session.phoneNumber,
+          lastLogin: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        }, { merge: true });
+        
+        return {
+          uid: userCredential.user.uid,
+          phoneNumber: userCredential.user.phoneNumber,
+          user: userCredential.user
+        };
+      } else {
+        throw new Error('Authentication failed');
+      }
     } catch (error) {
       console.error('[AuthService] Error verifying OTP:', error);
       throw error;
@@ -124,8 +120,7 @@ const authService = {
   logout: async () => {
     try {
       console.log('[AuthService] Signing out user');
-      await signOut(auth);
-      await VerificationManager.clearSession();
+      await auth.signOut();
       console.log('[AuthService] Sign out complete');
     } catch (error) {
       console.error('[AuthService] Error signing out:', error);
@@ -147,8 +142,50 @@ const authService = {
    * @returns {() => void} unsubscribe function
    */
   onAuthStateChanged: (callback) => {
-    return onFirebaseAuthStateChanged(auth, callback);
+    return auth.onAuthStateChanged(callback);
   },
+
+  // Legacy methods for backward compatibility (if needed)
+  /**
+   * @deprecated Use the new methods instead
+   */
+  sendOTPLegacy: async (phoneNumber) => {
+    console.warn('[AuthService] sendOTPLegacy is deprecated, use sendOTP instead');
+    return authService.sendOTP(phoneNumber);
+  },
+
+  /**
+   * @deprecated Use the new methods instead
+   */
+  verifyOTPLegacy: async (code, routeParams) => {
+    console.warn('[AuthService] verifyOTPLegacy is deprecated, use verifyOTP instead');
+    return authService.verifyOTP(code, routeParams);
+  },
+
+  /**
+   * Get user profile from Firestore
+   * @param {string} uid - The user ID
+   * @returns {Promise<Object>} - The user profile data
+   */
+  getUserProfile: async (uid) => {
+    try {
+      console.log('[AuthService] Getting user profile for:', uid);
+      const userRef = doc(db, 'users', uid);
+      const userDoc = await getDoc(userRef);
+      
+      if (!userDoc.exists()) {
+        throw new Error('User profile not found');
+      }
+      
+      return {
+        uid: userDoc.id,
+        ...userDoc.data()
+      };
+    } catch (error) {
+      console.error('[AuthService] Error getting user profile:', error);
+      throw error;
+    }
+  }
 };
 
 export default authService;

@@ -1,13 +1,13 @@
-import js from '@eslint/js';
-import { FlatCompat } from '@eslint/eslintrc';
-import react from 'eslint-plugin-react/configs/recommended.js';
-import reactHooks from 'eslint-plugin-react-hooks';
-import typescriptPlugin from '@typescript-eslint/eslint-plugin';
-import typescriptParser from '@typescript-eslint/parser';
+const js = require('@eslint/js');
+const { FlatCompat } = require('@eslint/eslintrc');
+const react = require('eslint-plugin-react/configs/recommended.js');
+const reactHooks = require('eslint-plugin-react-hooks');
+const typescriptPlugin = require('@typescript-eslint/eslint-plugin');
+const typescriptParser = require('@typescript-eslint/parser');
 
 const compat = new FlatCompat();
 
-export default [
+module.exports = [
   ...compat.extends('eslint-config-expo'),
   js.configs.recommended,
   react,

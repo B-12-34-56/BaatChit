@@ -3,33 +3,6 @@ const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 const { generateRobustHash, compareHashes, areSimilar } = require('./imageHash');
 
-// Debug configuration
-const DEBUG = {
-  enabled: process.env.DEBUG_MODE === 'true',
-  logLevel: process.env.LOG_LEVEL || 'info', // 'debug', 'info', 'warn', 'error'
-  logThreshold: process.env.LOG_THRESHOLD || 30, // Threshold for logging similarity comparisons
-  logDetails: process.env.LOG_DETAILS === 'true' // Whether to log detailed hash information
-};
-
-// Enhanced logging function
-function log(level, message, data = null) {
-  if (!DEBUG.enabled && level === 'debug') return;
-  
-  const levels = ['debug', 'info', 'warn', 'error'];
-  const currentLevel = levels.indexOf(DEBUG.logLevel);
-  const messageLevel = levels.indexOf(level);
-  
-  if (messageLevel >= currentLevel) {
-    const timestamp = new Date().toISOString();
-    const prefix = `[${timestamp}] [${level.toUpperCase()}]`;
-    
-    if (data) {
-      console.log(prefix, message, JSON.stringify(data, null, 2));
-    } else {
-      console.log(prefix, message);
-    }
-  }
-}
 
 admin.initializeApp();
 
@@ -512,4 +485,51 @@ exports.healthCheck = functions.https.onRequest((req, res) => {
     timestamp: new Date().toISOString(),
     version: '2.0.0'
   });
-});// Force redeploy Wed Jun 11 23:35:54 EDT 2025
+});
+
+exports.verifyPhoneAndCreateToken = functions
+  .region('us-central1')
+  .https.onCall(async (data, context) => {
+    try {
+      const { phoneNumber, code } = data;
+
+      // Validate input
+      if (!phoneNumber || !code) {
+        throw new functions.https.HttpsError(
+          'invalid-argument',
+          'Phone number and verification code are required'
+        );
+      }
+
+      // Get the stored verification code
+      const verificationDoc = await verificationCodes
+        .where('phoneNumber', '==', phoneNumber)
+        .where('code', '==', code)
+        .where('expiresAt', '>', admin.firestore.Timestamp.now())
+        .limit(1)
+        .get();
+
+      if (verificationDoc.empty) {
+        throw new functions.https.HttpsError(
+          'invalid-argument',
+          'Invalid or expired verification code'
+        );
+      }
+
+      // Delete the used verification code
+      await verificationDoc.docs[0].ref.delete();
+
+      // Create a custom token
+      const customToken = await admin.auth().createCustomToken(phoneNumber);
+
+      return { customToken };
+    } catch (error) {
+      console.error('Error in verifyPhoneAndCreateToken:', error);
+      throw new functions.https.HttpsError(
+        'internal',
+        'An error occurred while verifying the phone number'
+      );
+    }
+  });
+
+// Force redeploy Wed Jun 11 23:35:54 EDT 2025

@@ -1,129 +1,222 @@
 import React, { useState, useEffect } from 'react';
-import { View, TextInput, Button, StyleSheet, Text } from 'react-native';
-import { useLocalSearchParams, router } from 'expo-router';
-import { authService } from '../services/authService';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  ActivityIndicator,
+  Platform,
+  KeyboardAvoidingView,
+  TextInput,
+  Alert,
+} from 'react-native';
+import { useRouter, useLocalSearchParams } from 'expo-router';
+import { getAuth } from 'firebase/auth';
+import { app } from '../utils/firebase';
+import authService from '../services/authService';
+import { useAuth } from '../contexts/AuthContext';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-export default function VerifyOTPScreen() {
-  const params = useLocalSearchParams();
+const auth = getAuth(app);
+
+const OTP_EXPIRY = 300000; // 5 minutes
+const MAX_ATTEMPTS = 3;
+
+export default function VerifyOTP() {
   const [otp, setOtp] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [session, setSession] = useState(null);
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [attempts, setAttempts] = useState(0);
+  const [sessionStartTime, setSessionStartTime] = useState(0);
+  const router = useRouter();
+  const params = useLocalSearchParams();
+  const { setUser } = useAuth();
 
   useEffect(() => {
-    // Store session data in component state on mount
-    console.log('[VerifyOTPScreen] Received params:', params);
-    
-    if (params.phoneNumber && params.verificationSid) {
-      const newSession = {
-        phoneNumber: params.phoneNumber,
-        sid: params.verificationSid,
-        timestamp: parseInt(params.timestamp) || Date.now()
-      };
-      
-      console.log('[VerifyOTPScreen] Setting session:', newSession);
-      setSession(newSession);
-    } else {
-      console.error('[VerifyOTPScreen] Missing required params:', {
-        hasPhoneNumber: !!params.phoneNumber,
-        hasVerificationSid: !!params.verificationSid,
-        hasTimestamp: !!params.timestamp
-      });
-    }
-  }, [params]);
+    // Get phone number and session data
+    const getSessionData = async () => {
+      try {
+        const session = await AsyncStorage.getItem('authSession');
+        if (!session) {
+          Alert.alert('Error', 'Session expired. Please try again.');
+          router.replace('/phone-login');
+          return;
+        }
 
-  const handleVerifyOTP = async () => {
-    try {
-      setLoading(true);
-      setError('');
-      
-      console.log('[VerifyOTPScreen] Verifying OTP:', {
-        code: otp,
-        session
-      });
-      
-      const userData = await authService.verifyOTP(otp, session);
-      console.log('[VerifyOTPScreen] Verification successful:', userData);
-      
-      // Navigate to home screen on success
-      router.replace('/home');
-    } catch (error) {
-      console.error('[VerifyOTPScreen] Error:', error);
-      setError(error.message);
-    } finally {
-      setLoading(false);
+        const { phoneNumber: storedPhone, timestamp } = JSON.parse(session);
+        setPhoneNumber(params.phoneNumber || storedPhone || '');
+        setSessionStartTime(timestamp);
+
+        // Check if session is expired
+        if (Date.now() - timestamp > OTP_EXPIRY) {
+          Alert.alert('Error', 'Verification code expired. Please request a new one.');
+          await AsyncStorage.removeItem('authSession');
+          router.replace('/phone-login');
+        }
+      } catch (error) {
+        console.error('Session error:', error);
+        router.replace('/phone-login');
+      }
+    };
+    getSessionData();
+  }, [params.phoneNumber]);
+
+  const validateOTP = (code) => {
+    if (!code) {
+      throw new Error('Please enter the verification code');
+    }
+    if (!code.match(/^\d{6}$/)) {
+      throw new Error('Please enter a valid 6-digit code');
+    }
+    return code;
+  };
+
+  const checkAttempts = () => {
+    if (attempts >= MAX_ATTEMPTS) {
+      throw new Error('Too many attempts. Please request a new code.');
     }
   };
 
-  if (!session) {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.error}>Invalid verification session</Text>
-        <Button
-          title="Go Back"
-          onPress={() => router.back()}
-        />
-      </View>
-    );
-  }
+  const handleVerifyOTP = async () => {
+    try {
+      // Validate OTP
+      const code = validateOTP(otp);
+      
+      // Check attempts
+      checkAttempts();
+
+      // Check session expiry
+      if (Date.now() - sessionStartTime > OTP_EXPIRY) {
+        throw new Error('Verification code expired. Please request a new one.');
+      }
+
+      setIsLoading(true);
+      
+      const result = await authService.verifyOTP(code, {
+        phoneNumber,
+        verificationSid: params.verificationSid
+      });
+      
+      if (result.user) {
+        setUser(result.user);
+        // Clear all stored data
+        await AsyncStorage.multiRemove([
+          'phoneNumber',
+          'authSession'
+        ]);
+        router.replace('/home');
+      } else {
+        throw new Error('Verification failed');
+      }
+    } catch (error) {
+      setAttempts(prev => prev + 1);
+      Alert.alert('Error', error.message || 'Failed to verify code');
+      
+      if (attempts >= MAX_ATTEMPTS - 1) {
+        // Clear session and redirect to phone login
+        await AsyncStorage.multiRemove(['authSession']);
+        router.replace('/phone-login');
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.phoneNumber}>
-        Enter code sent to {session.phoneNumber}
-      </Text>
-      
-      <TextInput
-        style={styles.input}
-        placeholder="Enter 6-digit code"
-        value={otp}
-        onChangeText={setOtp}
-        keyboardType="number-pad"
-        maxLength={6}
-        editable={!loading}
-      />
-      
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-      
-      <Button
-        title={loading ? 'Verifying...' : 'Verify OTP'}
-        onPress={handleVerifyOTP}
-        disabled={loading || otp.length !== 6}
-      />
-      
-      <Button
-        title="Go Back"
-        onPress={() => router.back()}
-        disabled={loading}
-      />
-    </View>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
+      <View style={styles.content}>
+        <Text style={styles.title}>Enter Verification Code</Text>
+        <Text style={styles.subtitle}>
+          We've sent a verification code to {phoneNumber}
+        </Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Enter 6-digit code"
+          value={otp}
+          onChangeText={setOtp}
+          keyboardType="number-pad"
+          maxLength={6}
+          autoFocus
+        />
+        <TouchableOpacity 
+          style={[styles.button, isLoading && styles.buttonDisabled]} 
+          onPress={handleVerifyOTP}
+          disabled={isLoading}
+        >
+          {isLoading ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.buttonText}>Verify Code</Text>
+          )}
+        </TouchableOpacity>
+
+        <TouchableOpacity 
+          style={styles.resendButton}
+          onPress={() => router.back()}
+        >
+          <Text style={styles.resendText}>Change Phone Number</Text>
+        </TouchableOpacity>
+      </View>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 20,
-    justifyContent: 'center'
+    backgroundColor: '#fff',
   },
-  phoneNumber: {
+  content: {
+    flex: 1,
+    justifyContent: 'center',
+    padding: 20,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  subtitle: {
     fontSize: 16,
+    color: '#666',
     marginBottom: 20,
-    textAlign: 'center'
+    textAlign: 'center',
   },
   input: {
     borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 5,
-    padding: 10,
+    borderColor: '#ddd',
+    padding: 15,
+    borderRadius: 8,
     marginBottom: 20,
+    fontSize: 16,
     textAlign: 'center',
-    fontSize: 24,
-    letterSpacing: 8
+    letterSpacing: 8,
   },
-  error: {
-    color: 'red',
-    marginBottom: 10,
-    textAlign: 'center'
-  }
+  button: {
+    backgroundColor: '#007AFF',
+    padding: 15,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  buttonDisabled: {
+    opacity: 0.7,
+  },
+  buttonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  resendButton: {
+    marginTop: 20,
+    padding: 10,
+  },
+  resendText: {
+    color: '#007AFF',
+    fontSize: 16,
+    textAlign: 'center',
+  },
 }); 

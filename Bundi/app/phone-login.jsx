@@ -1,245 +1,119 @@
-import React, { useState, useRef, useEffect } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  Alert,
-  TextInput,
-} from 'react-native';
-import { useRouter } from 'expo-router';
-import { TwilioService } from '../src/utils/twilio';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useAuthState } from 'react-firebase-hooks/auth';
+import React, { useState, useEffect } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
+import { router } from 'expo-router';
 import { auth } from '../src/utils/firebase';
-import { PhoneAuthProvider, signInWithCredential } from 'firebase/auth';
 import authService from '../src/services/authService';
-
-const RATE_LIMIT_WINDOW = 60000; // 1 minute
-const MAX_ATTEMPTS = 3;
+import { useAuth } from '../src/contexts/AuthContext';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function PhoneLogin() {
   const [phoneNumber, setPhoneNumber] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [attempts, setAttempts] = useState(0);
-  const [lastAttemptTime, setLastAttemptTime] = useState(0);
-  const [user] = useAuthState(auth);
-  const router = useRouter();
-  const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const { user, setUser } = useAuth();
 
   useEffect(() => {
-    // If user is already logged in, redirect to home
     if (user) {
       router.replace('/home');
+    }
+  }, [user]);
+
+  const handleSendOTP = async () => {
+    if (!phoneNumber) {
+      Alert.alert('Error', 'Please enter a phone number');
       return;
     }
 
-    // Check for existing session
-    const checkSession = async () => {
-      try {
-        const session = await AsyncStorage.getItem('authSession');
-        if (session) {
-          const { timestamp, phoneNumber: storedPhone } = JSON.parse(session);
-          // If session is less than 5 minutes old, redirect to OTP
-          if (Date.now() - timestamp < 300000) {
-            router.push({
-              pathname: '/verify-otp',
-              params: { phoneNumber: storedPhone }
-            });
-          } else {
-            // Clear expired session
-            await AsyncStorage.removeItem('authSession');
-          }
-        }
-      } catch (error) {
-        console.error('Session check error:', error);
-      }
-    };
-    checkSession();
-  }, [user]);
-
-  const formatPhoneNumber = (number) => {
-    // Remove all non-digit characters except +
-    const cleaned = number.replace(/[^\d+]/g, '');
-    
-    // If it doesn't start with +, add +1 for US numbers
-    if (!cleaned.startsWith('+')) {
-      // If it's a 10-digit number, assume it's US
-      if (cleaned.length === 10) {
-        return `+1${cleaned}`;
-      }
-      // Otherwise, just add +
-      return `+${cleaned}`;
-    }
-    
-    return cleaned;
-  };
-
-  const validatePhoneNumber = (number) => {
-    const formatted = formatPhoneNumber(number);
-    if (!formatted.startsWith('+')) {
-      throw new Error('Please enter a valid phone number with country code');
-    }
-    if (formatted.length < 10) {
-      throw new Error('Please enter a valid phone number');
-    }
-    return formatted;
-  };
-
-  const checkRateLimit = () => {
-    const now = Date.now();
-    if (now - lastAttemptTime < RATE_LIMIT_WINDOW) {
-      if (attempts >= MAX_ATTEMPTS) {
-        const waitTime = Math.ceil((RATE_LIMIT_WINDOW - (now - lastAttemptTime)) / 1000);
-        throw new Error(`Too many attempts. Please wait ${waitTime} seconds before trying again.`);
-      }
-    } else {
-      // Reset attempts if window has passed
-      setAttempts(0);
-    }
-  };
-
-  const sendOTP = async (phoneNumber) => {
-    try {
-      console.log('Sending OTP to:', phoneNumber);
-      const response = await TwilioService.sendOTP(phoneNumber);
-      console.log('Twilio response:', response);
-      
-      if (!response || !response.sid) {
-        throw new Error('Invalid response from Twilio service');
-      }
-      
-      await AsyncStorage.setItem('verificationId', response.sid);
-      return response.sid;
-    } catch (error) {
-      console.error('Error sending OTP:', error);
-      throw new Error(error.message || 'Failed to send verification code. Please try again.');
-    }
-  };
-
-  const handleSendOTP = async () => {
-    try {
-      if (!phoneNumber) {
-        Alert.alert('Error', 'Please enter your phone number');
-        return;
-      }
-
-      // Validate phone number
-      const formattedNumber = validatePhoneNumber(phoneNumber);
-      console.log('Formatted phone number:', formattedNumber);
-      
-      // Check rate limit
-      checkRateLimit();
-
-      setIsLoading(true);
-      
-      // Store the formatted number for verification
-      await AsyncStorage.setItem('phoneNumber', formattedNumber);
-      
-      // Create session
-      const session = {
-        phoneNumber: formattedNumber,
-        timestamp: Date.now()
-      };
-      await AsyncStorage.setItem('authSession', JSON.stringify(session));
-      
-      // Send OTP
-      const verificationId = await sendOTP(formattedNumber);
-      console.log('Verification ID:', verificationId);
-      
-      // Update attempts
-      setAttempts(prev => prev + 1);
-      setLastAttemptTime(Date.now());
-      
-      // Navigate to OTP verification screen
-      router.push({
-        pathname: '/verify-otp',
-        params: { phoneNumber: formattedNumber }
-      });
-    } catch (error) {
-      console.error('Error in handleSendOTP:', error);
-      Alert.alert('Error', error.message || 'Failed to send verification code');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleVerifyOTP = async () => {
     try {
       setLoading(true);
-      setError(null);
-
-      if (!otp || otp.length !== 6) {
-        setError('Please enter a valid 6-digit code');
-        return;
-      }
-
-      // Add debug logging before the verifyOTP call
-      console.log('authService =', authService);
-      const result = await authService.verifyOTP(phoneNumber, otp);
+      console.log('[PhoneLogin] Starting OTP send process');
+      const formattedPhone = phoneNumber.startsWith('+') ? phoneNumber : `+${phoneNumber}`;
+      console.log('[PhoneLogin] Formatted phone:', formattedPhone);
       
-      if (result.verified) {
-        // Navigate to the main app
-        router.replace('/(tabs)');
-      } else {
-        setError('Verification failed. Please try again.');
-      }
+      const result = await authService.sendOTP(formattedPhone);
+      console.log('[PhoneLogin] OTP sent successfully:', result);
+      
+      // Store session data
+      const sessionData = {
+        phoneNumber: result.phoneNumber,
+        verificationSid: result.sid,
+        timestamp: Date.now()
+      };
+      
+      console.log('[PhoneLogin] Storing session data:', sessionData);
+      await AsyncStorage.setItem('authSession', JSON.stringify(sessionData));
+      
+      // Navigate to verify-otp screen with params
+      console.log('[PhoneLogin] Navigating to verify-otp screen');
+      router.push({
+        pathname: '/verify-otp',
+        params: {
+          phoneNumber: result.phoneNumber,
+          verificationSid: result.sid
+        }
+      });
     } catch (error) {
-      console.error('Error verifying OTP:', error);
-      setError(error.message || 'Failed to verify code. Please try again.');
+      console.error('[PhoneLogin] Error sending OTP:', error);
+      
+      // Handle specific error cases
+      if (error.message?.includes('Max send attempts reached')) {
+        Alert.alert(
+          'Too Many Attempts',
+          'You have reached the maximum number of attempts. Please wait a few minutes before trying again.',
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                // Clear any existing session data
+                AsyncStorage.removeItem('authSession');
+              }
+            }
+          ]
+        );
+      } else if (error.message?.includes('Phone number must be 10 digits')) {
+        Alert.alert('Invalid Phone Number', 'Please enter a valid 10-digit US phone number');
+      } else {
+        Alert.alert('Error', error.message || 'Failed to send OTP. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <View style={styles.content}>
-        <Text style={styles.title}>Enter Your Phone Number</Text>
-        <Text style={styles.subtitle}>
-          We'll send you a verification code
-        </Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Enter phone number (e.g., 1234567890)"
-          value={phoneNumber}
-          onChangeText={setPhoneNumber}
-          keyboardType="phone-pad"
-          maxLength={15}
-        />
-        <TouchableOpacity 
-          style={[styles.button, isLoading && styles.buttonDisabled]} 
-          onPress={handleSendOTP}
-          disabled={isLoading}
-        >
-          {isLoading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.buttonText}>Send Code</Text>
-          )}
-        </TouchableOpacity>
-      </View>
-    </KeyboardAvoidingView>
+    <View style={styles.container}>
+      <Text style={styles.title}>Enter Phone Number</Text>
+      <Text style={styles.subtitle}>We'll send you a verification code</Text>
+      
+      <TextInput
+        style={styles.input}
+        placeholder="Phone Number (e.g. +1234567890)"
+        value={phoneNumber}
+        onChangeText={setPhoneNumber}
+        keyboardType="phone-pad"
+        autoComplete="tel"
+      />
+
+      <TouchableOpacity 
+        style={[styles.button, loading && styles.buttonDisabled]}
+        onPress={handleSendOTP}
+        disabled={loading}
+      >
+        {loading ? (
+          <ActivityIndicator color="#fff" />
+        ) : (
+          <Text style={styles.buttonText}>Send OTP</Text>
+        )}
+      </TouchableOpacity>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
-  },
-  content: {
-    flex: 1,
-    justifyContent: 'center',
     padding: 20,
+    justifyContent: 'center',
+    backgroundColor: '#fff',
   },
   title: {
     fontSize: 24,
@@ -250,7 +124,7 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 16,
     color: '#666',
-    marginBottom: 20,
+    marginBottom: 30,
     textAlign: 'center',
   },
   input: {
@@ -268,7 +142,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   buttonDisabled: {
-    opacity: 0.7,
+    backgroundColor: '#ccc',
   },
   buttonText: {
     color: '#fff',

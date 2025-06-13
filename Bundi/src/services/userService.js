@@ -81,28 +81,35 @@ export async function searchUsers(queryStr) {
     const usersRef = collection(db, 'users');
     let results = [];
 
+    // Normalize the query string
+    const normalizedQuery = queryStr.trim().toLowerCase();
+
     // Search by phone number
-    if (queryStr.includes('+') || /^\d+$/.test(queryStr)) {
-      const phoneQuery = query(usersRef, where('phoneNumber', '==', queryStr));
+    if (normalizedQuery.includes('+') || /^\d+$/.test(normalizedQuery)) {
+      // Remove any non-digit characters except + for phone search
+      const phoneNumber = normalizedQuery.replace(/[^\d+]/g, '');
+      const phoneQuery = query(usersRef, where('phoneNumber', '==', phoneNumber));
       const phoneSnapshot = await getDocs(phoneQuery);
       results = [...results, ...phoneSnapshot.docs.map(doc => doc.data())];
     }
 
     // Search by email
-    if (queryStr.includes('@')) {
-      const emailQuery = query(usersRef, where('email', '==', queryStr.toLowerCase()));
+    if (normalizedQuery.includes('@')) {
+      const emailQuery = query(usersRef, where('email', '==', normalizedQuery));
       const emailSnapshot = await getDocs(emailQuery);
       results = [...results, ...emailSnapshot.docs.map(doc => doc.data())];
     }
 
-    // Search by display name
-    const nameQuery = query(
-      usersRef,
-      where('displayName', '>=', queryStr),
-      where('displayName', '<=', queryStr + '\uf8ff')
-    );
-    const nameSnapshot = await getDocs(nameQuery);
-    results = [...results, ...nameSnapshot.docs.map(doc => doc.data())];
+    // Search by display name (only if query is at least 3 characters)
+    if (normalizedQuery.length >= 3) {
+      const nameQuery = query(
+        usersRef,
+        where('displayName', '>=', normalizedQuery),
+        where('displayName', '<=', normalizedQuery + '\uf8ff')
+      );
+      const nameSnapshot = await getDocs(nameQuery);
+      results = [...results, ...nameSnapshot.docs.map(doc => doc.data())];
+    }
 
     // Remove duplicates based on uid
     const uniqueResults = Array.from(new Map(results.map(item => [item.uid, item])).values());

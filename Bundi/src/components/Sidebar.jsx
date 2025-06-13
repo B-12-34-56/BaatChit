@@ -14,6 +14,7 @@ import Chats from './Chats';
 import FriendRequestsDropdown from './FriendRequestsDropdown';
 import Toast from 'react-native-toast-message';
 import { messageService } from '../services/messageService';
+import { friendRequestService } from '../services/friendRequestService';
 
 const Sidebar = () => {
   const { dispatch } = useContext(ChatContext);
@@ -22,27 +23,25 @@ const Sidebar = () => {
   const [error, setError] = useState(null);
   const [currentUser] = useAuthState(auth);
   const router = useRouter();
+  const isMounted = useRef(true);
+  const lastUpdate = useRef(Date.now());
 
   useEffect(() => {
-    console.log('[DEBUG] Sidebar useEffect triggered');
     if (!currentUser?.uid) {
-      console.log('[DEBUG] No current user found, returning early');
       setLoading(false);
       return;
     }
 
-    let isMounted = true;
     setLoading(true);
     setError(null);
 
     // Subscribe to user document for real-time friend updates
     const userRef = doc(db, 'users', currentUser.uid);
     const unsubscribeUser = onSnapshot(userRef, async (userDoc) => {
-      if (!isMounted) return;
+      if (!isMounted.current) return;
 
       try {
         if (!userDoc.exists()) {
-          console.log('[DEBUG] User document not found in Firestore');
           setError('User profile not found');
           setFriends([]);
           return;
@@ -52,10 +51,17 @@ const Sidebar = () => {
         const friendUids = userData.friends || [];
 
         if (!friendUids.length) {
-          console.log('[DEBUG] No friends found in user document');
           setFriends([]);
+          setLoading(false);
           return;
         }
+
+        // Throttle updates to prevent excessive re-renders
+        const now = Date.now();
+        if (now - lastUpdate.current < 1000) {
+          return;
+        }
+        lastUpdate.current = now;
 
         // Create a query to get all friends' documents
         const friendsQuery = query(
@@ -65,19 +71,18 @@ const Sidebar = () => {
 
         // Subscribe to friends' documents
         const unsubscribeFriends = onSnapshot(friendsQuery, (snapshot) => {
-          if (!isMounted) return;
+          if (!isMounted.current) return;
 
           const friendProfiles = snapshot.docs.map(doc => ({
             uid: doc.id,
             ...doc.data()
           }));
 
-          console.log('[DEBUG] Friends updated:', friendProfiles.length);
           setFriends(friendProfiles);
           setLoading(false);
         }, (error) => {
-          console.error('[DEBUG] Error in friends listener:', error);
-          if (isMounted) {
+          console.error('Error in friends listener:', error);
+          if (isMounted.current) {
             setError('Failed to load friends');
             setLoading(false);
           }
@@ -87,33 +92,24 @@ const Sidebar = () => {
           unsubscribeFriends();
         };
       } catch (err) {
-        console.error('[DEBUG] Error in user listener:', err);
-        if (isMounted) {
+        console.error('Error in user listener:', err);
+        if (isMounted.current) {
           setError(err.message || 'Failed to load friends');
           setLoading(false);
         }
       }
-    }, (error) => {
-      console.error('[DEBUG] Error in user listener:', error);
-      if (isMounted) {
-        setError('Failed to load user data');
-        setLoading(false);
-      }
     });
 
     return () => {
-      console.log('[DEBUG] Sidebar useEffect cleanup');
-      isMounted = false;
+      isMounted.current = false;
       unsubscribeUser();
     };
   }, [currentUser]);
 
   const handleStartChat = async (friend) => {
     try {
-      // Create/get conversation
       const conversationId = await messageService.createConversation(currentUser.uid, friend.uid);
       
-      // Update chat context to open the chat
       dispatch({
         type: 'CHANGE_USER',
         payload: {

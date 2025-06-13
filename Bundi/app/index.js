@@ -1,7 +1,15 @@
 // app/index.js - Updated version
 import React from 'react';
-import { Redirect } from 'expo-router';
+import { db } from '../src/utils/firebase';
+import App from './_layout';
+
+// Ensure Firestore is initialized
+console.log('Firestore initialized:', db);
 
 export default function Index() {
-  return <Redirect href="/phone-login" />;
+  return (
+    <React.StrictMode>
+      <App />
+    </React.StrictMode>
+  );
 }

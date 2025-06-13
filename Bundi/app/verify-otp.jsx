@@ -11,8 +11,10 @@ import {
   Alert,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { auth } from '../src/utils/firebase';
 import authService from '../src/services/authService';
+import { useAuth } from '../src/contexts/AuthContext';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const OTP_EXPIRY = 300000; // 5 minutes
 const MAX_ATTEMPTS = 3;
@@ -25,8 +27,14 @@ export default function VerifyOTP() {
   const [sessionStartTime, setSessionStartTime] = useState(0);
   const router = useRouter();
   const params = useLocalSearchParams();
+  const { user, setUser } = useAuth();
 
   useEffect(() => {
+    if (user) {
+      router.replace('/home');
+      return;
+    }
+
     // Get phone number and session data
     const getSessionData = async () => {
       try {
@@ -37,7 +45,9 @@ export default function VerifyOTP() {
           return;
         }
 
-        const { phoneNumber: storedPhone, timestamp } = JSON.parse(session);
+        const { phoneNumber: storedPhone, timestamp, verificationSid } = JSON.parse(session);
+        
+        // Use params if available, otherwise use stored data
         setPhoneNumber(params.phoneNumber || storedPhone || '');
         setSessionStartTime(timestamp);
 
@@ -53,7 +63,7 @@ export default function VerifyOTP() {
       }
     };
     getSessionData();
-  }, [params.phoneNumber]);
+  }, [params.phoneNumber, user]);
 
   const validateOTP = (code) => {
     if (!code) {
@@ -86,31 +96,56 @@ export default function VerifyOTP() {
 
       setIsLoading(true);
       
-      // Add debug logging before the verifyOTP call
-      console.log('authService =', authService);
-      const result = await authService.verifyOTP(phoneNumber, code);
-      
-      if (!result.user) {
-        throw new Error('Failed to create user account');
+      // Get session data
+      const session = await AsyncStorage.getItem('authSession');
+      if (!session) {
+        throw new Error('Session expired. Please try again.');
       }
-
-      // Clear all stored data
-      await AsyncStorage.multiRemove([
-        'phoneNumber',
-        'authSession'
-      ]);
       
-      // Navigate to home
-      router.replace('/home');
+      const sessionData = JSON.parse(session);
+      console.log('[VerifyOTP] Session data:', sessionData);
+      
+      const result = await authService.verifyOTP(code, {
+        phoneNumber: sessionData.phoneNumber,
+        verificationSid: sessionData.verificationSid,
+        code: code
+      });
+      
+      if (result.user) {
+        setUser(result.user);
+        // Clear all stored data
+        await AsyncStorage.multiRemove([
+          'phoneNumber',
+          'authSession'
+        ]);
+        router.replace('/home');
+      } else {
+        throw new Error('Verification failed');
+      }
     } catch (error) {
-      setAttempts(prev => prev + 1);
-      Alert.alert('Error', error.message || 'Failed to verify code');
+      console.error('[VerifyOTP] Error:', error);
       
-      if (attempts >= MAX_ATTEMPTS - 1) {
-        // Clear session and redirect to phone login
-        await AsyncStorage.multiRemove(['authSession']);
-        router.replace('/phone-login');
+      // Handle specific error types
+      if (error.message?.includes('Service account needs the Service Account Token Creator role')) {
+        Alert.alert(
+          'System Error',
+          'There is a configuration issue with the authentication system. Please contact support.',
+          [{ text: 'OK', onPress: () => router.replace('/phone-login') }]
+        );
+        return;
       }
+      
+      if (attempts >= MAX_ATTEMPTS) {
+        Alert.alert(
+          'Too Many Attempts',
+          'You have exceeded the maximum number of attempts. Please try again later.',
+          [{ text: 'OK', onPress: () => router.replace('/phone-login') }]
+        );
+        return;
+      }
+      
+      setAttempts(prev => prev + 1);
+      Alert.alert('Error', error.message || 'Failed to verify OTP. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -124,7 +159,7 @@ export default function VerifyOTP() {
       <View style={styles.content}>
         <Text style={styles.title}>Enter Verification Code</Text>
         <Text style={styles.subtitle}>
-          Enter the code sent to {phoneNumber}
+          We've sent a verification code to {phoneNumber}
         </Text>
         <TextInput
           style={styles.input}
@@ -146,6 +181,13 @@ export default function VerifyOTP() {
             <Text style={styles.buttonText}>Verify Code</Text>
           )}
         </TouchableOpacity>
+
+        <TouchableOpacity 
+          style={styles.resendButton}
+          onPress={() => router.replace('/phone-login')}
+        >
+          <Text style={styles.resendText}>Change Phone Number</Text>
+        </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
   );
@@ -158,8 +200,8 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    justifyContent: 'center',
     padding: 20,
+    justifyContent: 'center',
   },
   title: {
     fontSize: 24,
@@ -170,18 +212,17 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 16,
     color: '#666',
-    marginBottom: 20,
+    marginBottom: 30,
     textAlign: 'center',
   },
   input: {
     borderWidth: 1,
     borderColor: '#ddd',
-    padding: 15,
     borderRadius: 8,
+    padding: 15,
+    fontSize: 18,
     marginBottom: 20,
-    fontSize: 16,
     textAlign: 'center',
-    letterSpacing: 8,
   },
   button: {
     backgroundColor: '#007AFF',
@@ -190,11 +231,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   buttonDisabled: {
-    opacity: 0.7,
+    backgroundColor: '#ccc',
   },
   buttonText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  resendButton: {
+    marginTop: 20,
+    padding: 10,
+  },
+  resendText: {
+    color: '#007AFF',
+    fontSize: 16,
+    textAlign: 'center',
   },
 }); 

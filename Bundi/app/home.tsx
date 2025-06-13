@@ -15,7 +15,7 @@ import { ChatContextProvider, ChatContext } from '../src/context/ChatContext';
 
 const { width, height } = Dimensions.get('window');
 
-const Home = () => {
+export default function Home() {
   const [activeView, setActiveView] = useState('friends'); // 'friends' or 'chats'
   const router = useRouter();
 
@@ -125,7 +125,7 @@ const Home = () => {
       </LinearGradient>
     </ChatContextProvider>
   );
-};
+}
 
 // Separate component to access context
 const ChatViewContainer = () => {
@@ -145,5 +145,3 @@ const ChatViewContainer = () => {
     </View>
   );
 };
-
-export default Home;

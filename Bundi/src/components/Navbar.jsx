@@ -38,6 +38,10 @@ const Navbar = () => {
     );
   };
 
+  const handleProfile = () => {
+    router.push('/profile');
+  };
+
   return (
     <View style={{
       flexDirection: 'row',
@@ -64,15 +68,26 @@ const Navbar = () => {
           Bundi/Kitab
         </Text>
       </View>
-      <TouchableOpacity 
-        onPress={handleLogout}
-        style={{
-          padding: 8,
-          borderRadius: 8,
-        }}
-      >
-        <Ionicons name="log-out-outline" size={24} color="#e53e3e" />
-      </TouchableOpacity>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+        <TouchableOpacity 
+          onPress={handleProfile}
+          style={{
+            padding: 8,
+            borderRadius: 8,
+          }}
+        >
+          <Ionicons name="person-circle-outline" size={24} color="#667eea" />
+        </TouchableOpacity>
+        <TouchableOpacity 
+          onPress={handleLogout}
+          style={{
+            padding: 8,
+            borderRadius: 8,
+          }}
+        >
+          <Ionicons name="log-out-outline" size={24} color="#e53e3e" />
+        </TouchableOpacity>
+      </View>
     </View>
   );
 };

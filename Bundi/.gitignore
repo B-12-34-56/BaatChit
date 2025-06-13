@@ -78,4 +78,4 @@ functions/service-account.json
 
 # Sensitive configuration files
 src/utils/firebase.template.js
-functions/index.js
+functions/index.js.env
