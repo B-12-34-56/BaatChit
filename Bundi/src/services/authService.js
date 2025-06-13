@@ -1,15 +1,17 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { 
   getAuth, 
-  signInWithCredential, 
-  PhoneAuthProvider,
+  signInAnonymously,
   signOut, 
-  onAuthStateChanged as onFirebaseAuthStateChanged,
-  RecaptchaVerifier
+  onAuthStateChanged as onFirebaseAuthStateChanged
 } from 'firebase/auth';
+import { doc, setDoc, getFirestore, serverTimestamp } from 'firebase/firestore';
 import { app } from '../utils/firebase';
+import { sendOTP, verifyOTP } from '../utils/twilio';
+import VerificationManager from './verificationManager';
 
 const auth = getAuth();
+const db = getFirestore(app);
 
 /**
  * Normalize a phone number to E.164 format (e.g. "+15551234567")
@@ -17,135 +19,117 @@ const auth = getAuth();
 function formatPhoneNumber(phone) {
   let cleaned = phone.replace(/[^\d+]/g, '');
   if (!cleaned.startsWith('+')) cleaned = `+${cleaned}`;
-  console.log('Formatted phone number:', cleaned);
   return cleaned;
 }
 
 const authService = {
   /**
-   * Send an OTP via Firebase
-   * @param {string} phoneNumber — raw or E.164-format
-   * @returns {Promise<string>} verificationId
+   * Send OTP to phone number
+   * @param {string} phoneNumber - The phone number to send OTP to
+   * @returns {Promise<{sid: string, phoneNumber: string}>} - The verification session
    */
   sendOTP: async (phoneNumber) => {
-    const e164 = formatPhoneNumber(phoneNumber);
     try {
-      console.log('Sending OTP to:', e164);
+      console.log('[AuthService] Sending OTP to:', phoneNumber);
       
-      // Clear any existing verification data
-      await AsyncStorage.removeItem('confirmationResult');
+      // Format phone number to E.164
+      const formattedPhone = phoneNumber.startsWith('+') ? phoneNumber : `+${phoneNumber}`;
+      console.log('[AuthService] Formatted phone:', formattedPhone);
       
-      // Create a new reCAPTCHA verifier
-      const recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
-        size: 'invisible',
-        callback: () => {
-          console.log('reCAPTCHA verified');
-        }
-      });
-
-      // Send verification code
-      const confirmationResult = await auth.signInWithPhoneNumber(e164, recaptchaVerifier);
-      console.log('Verification code sent successfully');
+      // Send OTP via Twilio
+      const result = await sendOTP(formattedPhone);
+      console.log('[AuthService] Twilio response:', result);
       
-      // Store the confirmation result
-      const verificationData = {
-        phoneNumber: e164,
-        verificationId: confirmationResult.verificationId,
+      // Store verification session
+      const session = {
+        phoneNumber: formattedPhone,
+        sid: result.sid,
         timestamp: Date.now()
       };
       
-      await AsyncStorage.setItem('confirmationResult', JSON.stringify(verificationData));
-      console.log('Stored verification data:', verificationData);
+      console.log('[AuthService] Storing session:', session);
+      await VerificationManager.storeSession(session);
       
-      return confirmationResult.verificationId;
+      return {
+        sid: result.sid,
+        phoneNumber: formattedPhone
+      };
     } catch (error) {
-      console.error('Error sending OTP:', error);
-      // Clear any partial verification data
-      await AsyncStorage.removeItem('confirmationResult');
-      throw new Error(`Failed to send OTP: ${error.message}`);
+      console.error('[AuthService] Error sending OTP:', error);
+      throw error;
     }
   },
 
   /**
-   * Verify the OTP code and sign in with Firebase
-   * @param {string} phoneNumber — must match the one used in sendOTP()
-   * @param {string} code — 6-digit verification code
-   * @returns {Promise<import('firebase/auth').UserCredential.user>}
+   * Verify OTP and sign in user
+   * @param {string} code - The OTP code to verify
+   * @param {Object} routeParams - The route parameters containing verification session
+   * @returns {Promise<Object>} - The user data
    */
-  verifyOTP: async (phoneNumber, code) => {
-    const e164 = formatPhoneNumber(phoneNumber);
+  verifyOTP: async (code, routeParams) => {
     try {
-      console.log('Verifying OTP for:', e164);
+      console.log('[AuthService] Verifying OTP with params:', { code, routeParams });
       
-      // Get the stored confirmation result
-      const storedData = await AsyncStorage.getItem('confirmationResult');
-      console.log('Retrieved stored data:', storedData);
+      // Get verification session from route params or storage
+      const session = await VerificationManager.getSession(routeParams);
+      console.log('[AuthService] Retrieved session:', session);
       
-      if (!storedData) {
-        throw new Error('No verification in progress. Please request a new code.');
-      }
-
-      const verificationData = JSON.parse(storedData);
-      console.log('Parsed verification data:', verificationData);
-
-      // Check if verification has expired (15 minutes)
-      const now = Date.now();
-      const verificationAge = now - verificationData.timestamp;
-      if (verificationAge > 15 * 60 * 1000) { // 15 minutes in milliseconds
-        await AsyncStorage.removeItem('confirmationResult');
-        throw new Error('Verification code expired. Please request a new code.');
-      }
-
-      if (verificationData.phoneNumber !== e164) {
-        console.error('Phone number mismatch:', {
-          stored: verificationData.phoneNumber,
-          current: e164
+      if (!session || !VerificationManager.validateSession(session)) {
+        console.error('[AuthService] Invalid session:', {
+          hasSession: !!session,
+          sessionData: session
         });
-        throw new Error('Phone number mismatch. Please start verification again.');
+        throw new Error('Invalid or expired verification session');
       }
-
-      // Get Firebase phone auth credential
-      const credential = PhoneAuthProvider.credential(
-        verificationData.verificationId,
+      
+      // Verify OTP with Twilio
+      console.log('[AuthService] Verifying with Twilio:', {
+        phoneNumber: session.phoneNumber,
         code
-      );
-
-      // Sign in with the credential
-      const userCredential = await signInWithCredential(auth, credential);
-      console.log('Successfully signed in with Firebase:', userCredential.user.uid);
+      });
+      await verifyOTP(session.phoneNumber, code);
       
-      // Store user ID
-      await AsyncStorage.setItem('uid', userCredential.user.uid);
+      // Sign in anonymously
+      console.log('[AuthService] Signing in anonymously');
+      const userCredential = await signInAnonymously(auth);
+      const user = userCredential.user;
+      console.log('[AuthService] Anonymous sign in successful:', user.uid);
       
-      // Clear verification data only after successful sign in
-      await AsyncStorage.removeItem('confirmationResult');
-      console.log('Cleared verification data after successful sign in');
+      // Create or update user document
+      const userRef = doc(db, 'users', user.uid);
+      console.log('[AuthService] Updating user document');
+      await setDoc(userRef, {
+        phoneNumber: session.phoneNumber,
+        lastVerified: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      }, { merge: true });
       
-      return userCredential.user;
+      // Clear verification session
+      console.log('[AuthService] Clearing verification session');
+      await VerificationManager.clearSession();
+      
+      return {
+        uid: user.uid,
+        phoneNumber: session.phoneNumber
+      };
     } catch (error) {
-      console.error('Error verifying OTP & signing in:', error);
-      if (error.code === 'auth/invalid-verification-code') {
-        throw new Error('Invalid verification code. Please try again.');
-      } else if (error.code === 'auth/invalid-verification-id') {
-        await AsyncStorage.removeItem('confirmationResult');
-        throw new Error('Verification expired. Please request a new code.');
-      }
-      throw new Error(`Authentication failed: ${error.message}`);
+      console.error('[AuthService] Error verifying OTP:', error);
+      throw error;
     }
   },
 
   /**
-   * Sign the current user out
+   * Sign out user
    */
   logout: async () => {
     try {
+      console.log('[AuthService] Signing out user');
       await signOut(auth);
-      await AsyncStorage.removeItem('uid');
-      await AsyncStorage.removeItem('confirmationResult');
-      console.log('Cleared all auth data during logout');
+      await VerificationManager.clearSession();
+      console.log('[AuthService] Sign out complete');
     } catch (error) {
-      console.error('Error signing out:', error);
-      throw new Error(`Failed to sign out: ${error.message}`);
+      console.error('[AuthService] Error signing out:', error);
+      throw error;
     }
   },
 
