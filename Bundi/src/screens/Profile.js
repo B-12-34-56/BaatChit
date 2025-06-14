@@ -17,10 +17,9 @@ import {
   TouchableWithoutFeedback,
 } from "react-native";
 import { getFirestore, doc, updateDoc } from "firebase/firestore";
-import { getStorage, ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import { getAuth, updateProfile } from "firebase/auth";
 import { useRouter } from "expo-router";
-import { app } from "../src/utils/firebase";
+import { app, uploadImageWithFileSystem } from "../src/utils/firebase";
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -150,28 +149,10 @@ const Profile = () => {
 
   const uploadImage = async (uri) => {
     try {
-      const response = await fetch(uri);
-      const blob = await response.blob();
-      
-      const storageRef = ref(storage, `avatars/${user.uid}_${Date.now()}`);
-      const uploadTask = uploadBytesResumable(storageRef, blob);
-      
-      return new Promise((resolve, reject) => {
-        uploadTask.on('state_changed',
-          (snapshot) => {
-            const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-            setUploadProgress(progress);
-          },
-          (error) => {
-            reject(error);
-          },
-          async () => {
-            const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-            resolve(downloadURL);
-          }
-        );
-      });
+      const downloadURL = await uploadImageWithFileSystem(uri, user.uid);
+      return downloadURL;
     } catch (error) {
+      console.error('Error uploading image:', error);
       throw new Error('Failed to upload image');
     }
   };

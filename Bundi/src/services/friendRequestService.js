@@ -10,150 +10,186 @@ import {
   getDoc,
   deleteDoc,
   arrayUnion,
+  arrayRemove,
   serverTimestamp,
   writeBatch,
-  setDoc
+  setDoc,
+  runTransaction,
+  Timestamp
 } from 'firebase/firestore';
 import { db } from '../utils/firebase';
+import { auth } from '../utils/firebase';
 
 export const friendRequestService = {
   // Send a friend request
-  async sendFriendRequest(fromUID, toUID) {
-    try {
-      // Check if users are the same
-      if (fromUID === toUID) {
-        throw new Error('Cannot send friend request to yourself');
-      }
+  async sendFriendRequest(toUID) {
+    const user = auth.currentUser;
+    if (!user) throw new Error('Not authenticated');
+    const userId = user.uid;
 
+    try {
       // Check if recipient exists
       const recipientDoc = await getDoc(doc(db, 'users', toUID));
       if (!recipientDoc.exists()) {
-        throw new Error('User not found');
-      }
-
-      // Check for recent request (cooldown)
-      const now = Date.now();
-      const cooldownQuery = query(
-        collection(db, 'friendRequests'),
-        where('from', 'in', [fromUID, toUID]),
-        where('receiverId', 'in', [fromUID, toUID]),
-        where('status', '==', 'pending')
-      );
-      const cooldownSnap = await getDocs(cooldownQuery);
-      for (const docSnap of cooldownSnap.docs) {
-        const data = docSnap.data();
-        if (data.cooldownUntil && data.cooldownUntil.toMillis() > now) {
-          throw new Error('Please wait before sending another friend request.');
-        }
-      }
-
-      // Check if request already exists (pending)
-      const existingQuery = query(
-        collection(db, 'friendRequests'),
-        where('from', '==', fromUID),
-        where('receiverId', '==', toUID),
-        where('status', '==', 'pending')
-      );
-      const existing = await getDocs(existingQuery);
-      if (!existing.empty) {
-        throw new Error('Friend request already sent');
-      }
-
-      // Check reverse request (if they already sent one to us)
-      const reverseQuery = query(
-        collection(db, 'friendRequests'),
-        where('from', '==', toUID),
-        where('receiverId', '==', fromUID),
-        where('status', '==', 'pending')
-      );
-      const reverseExisting = await getDocs(reverseQuery);
-      
-      if (!reverseExisting.empty) {
-        throw new Error('This user has already sent you a friend request');
-      }
-
-      // Check if they're already friends
-      const userDoc = await getDoc(doc(db, 'users', fromUID));
-      const userData = userDoc.data();
-      const friends = userData?.friends || []; // Handle undefined friends array
-      if (friends.includes(toUID)) {
-        throw new Error('Already friends with this user');
+        throw new Error('Recipient not found');
       }
 
       // Create friend request
-      const requestRef = await addDoc(collection(db, 'friendRequests'), {
-        from: fromUID,
+      const requestData = {
+        from: userId,
         receiverId: toUID,
         status: 'pending',
-        timestamp: serverTimestamp()
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      };
+
+      // Use transaction to ensure atomicity
+      await runTransaction(db, async (transaction) => {
+        const userDoc = await transaction.get(doc(db, 'users', userId));
+        if (!userDoc.exists()) {
+          throw new Error('User not found');
+        }
+
+        // Check if request already exists
+        const existingRequest = await getDoc(
+          query(
+            collection(db, 'friendRequests'),
+            where('from', '==', userId),
+            where('receiverId', '==', toUID),
+            where('status', 'in', ['pending', 'accepted'])
+          )
+        );
+
+        if (!existingRequest.empty) {
+          throw new Error('Friend request already exists');
+        }
+
+        // Create the request
+        const requestRef = doc(collection(db, 'friendRequests'));
+        transaction.set(requestRef, requestData);
       });
 
-      return { success: true, requestId: requestRef.id };
+      return requestData;
     } catch (error) {
-      console.error('Error sending friend request:', error);
-      return { 
-        success: false, 
-        message: error.message || 'Failed to send friend request' 
-      };
+      console.error('[FriendRequestService] Error sending friend request:', error);
+      throw error;
     }
   },
 
   // Accept a friend request
-  async acceptFriendRequest(requestId, currentUserUID) {
+  async acceptFriendRequest(requestId) {
+    const user = auth.currentUser;
+    if (!user) throw new Error('Not authenticated');
+    const userId = user.uid;
+
     try {
-      const batch = writeBatch(db);
-      
-      // Get the friend request
       const requestRef = doc(db, 'friendRequests', requestId);
-      const requestSnap = await getDoc(requestRef);
-      
-      if (!requestSnap.exists()) {
+      const requestDoc = await getDoc(requestRef);
+
+      if (!requestDoc.exists()) {
         throw new Error('Friend request not found');
       }
 
-      const requestData = requestSnap.data();
-      
-      // Verify the current user is the recipient
-      if (requestData.receiverId !== currentUserUID) {
-        throw new Error('Unauthorized to accept this request');
+      const requestData = requestDoc.data();
+      if (requestData.receiverId !== userId) {
+        throw new Error('Not authorized to accept this request');
       }
 
-      // Update friend request status
-      batch.update(requestRef, {
-        status: 'accepted',
-        acceptedAt: serverTimestamp()
+      if (requestData.status !== 'pending') {
+        throw new Error('Friend request is not pending');
+      }
+
+      // Use transaction to ensure atomicity
+      await runTransaction(db, async (transaction) => {
+        const senderRef = doc(db, 'users', requestData.from);
+        const recipientRef = doc(db, 'users', requestData.receiverId);
+
+        // Update request status
+        transaction.update(requestRef, {
+          status: 'accepted',
+          updatedAt: serverTimestamp()
+        });
+
+        // Add to friends list for both users
+        transaction.update(senderRef, {
+          friends: arrayUnion(requestData.receiverId)
+        });
+        transaction.update(recipientRef, {
+          friends: arrayUnion(requestData.from)
+        });
       });
 
-      // Use set with merge instead of update for friends arrays
-      const senderRef = doc(db, 'users', requestData.from);
-      const recipientRef = doc(db, 'users', requestData.receiverId);
-      batch.set(senderRef, { friends: arrayUnion(requestData.receiverId) }, { merge: true });
-      batch.set(recipientRef, { friends: arrayUnion(requestData.from) }, { merge: true });
-
-      // Create a conversation document
-      const conversationId = [requestData.from, requestData.receiverId].sort().join('_');
-      const conversationRef = doc(db, 'conversations', conversationId);
-      batch.set(conversationRef, {
-        participants: [requestData.from, requestData.receiverId],
-        createdAt: serverTimestamp(),
-        lastMessage: null,
-        lastMessageTime: null
-      }, { merge: true });
-
-      await batch.commit();
-      
-      // Fetch the new friend's user data
-      const friendUid = requestData.from === currentUserUID ? requestData.receiverId : requestData.from;
-      const friendDoc = await getDoc(doc(db, 'users', friendUid));
-      const friendData = friendDoc.exists() ? friendDoc.data() : null;
-      
-      return { success: true, friend: { uid: friendUid, ...friendData } };
+      return true;
     } catch (error) {
-      console.error('Error accepting friend request:', error);
-      return { 
-        success: false, 
-        message: error.message || 'Failed to accept friend request' 
-      };
+      console.error('[FriendRequestService] Error accepting friend request:', error);
+      throw error;
+    }
+  },
+
+  // Remove a friend
+  async removeFriend(friendUID) {
+    const user = auth.currentUser;
+    if (!user) throw new Error('Not authenticated');
+    const userId = user.uid;
+
+    try {
+      // Use transaction to ensure atomicity
+      await runTransaction(db, async (transaction) => {
+        const currentUserRef = doc(db, 'users', userId);
+        const friendRef = doc(db, 'users', friendUID);
+
+        // Remove from friends list for both users
+        transaction.update(currentUserRef, {
+          friends: arrayRemove(friendUID)
+        });
+        transaction.update(friendRef, {
+          friends: arrayRemove(userId)
+        });
+
+        // Delete any existing friend requests
+        const requestsQuery = query(
+          collection(db, 'friendRequests'),
+          where('from', 'in', [userId, friendUID]),
+          where('receiverId', 'in', [userId, friendUID]),
+          where('status', 'in', ['pending', 'accepted'])
+        );
+
+        const requestsSnapshot = await getDocs(requestsQuery);
+        requestsSnapshot.forEach((doc) => {
+          transaction.delete(doc.ref);
+        });
+      });
+
+      return true;
+    } catch (error) {
+      console.error('[FriendRequestService] Error removing friend:', error);
+      throw error;
+    }
+  },
+
+  // Cleanup stale friend requests
+  async cleanupFriendRequests() {
+    try {
+      const batch = writeBatch(db);
+      const now = Date.now();
+      
+      // Find and clean up old pending requests
+      const oldRequestsQuery = query(
+        collection(db, 'friendRequests'),
+        where('status', '==', 'pending'),
+        where('timestamp', '<', Timestamp.fromMillis(now - 7 * 24 * 60 * 60 * 1000)) // 7 days old
+      );
+      
+      const oldRequests = await getDocs(oldRequestsQuery);
+      oldRequests.docs.forEach(doc => {
+        batch.update(doc.ref, { status: 'expired' });
+      });
+      
+      await batch.commit();
+      return { success: true };
+    } catch (error) {
+      console.error('Error cleaning up friend requests:', error);
+      return { success: false, message: error.message };
     }
   },
 
@@ -423,48 +459,4 @@ export const friendRequestService = {
       return 'none';
     }
   },
-
-  // Add a new method to clean up all malformed requests
-  async cleanupFriendRequests() {
-    try {
-      const q = query(collection(db, 'friendRequests'));
-      const snapshot = await getDocs(q);
-      const batch = writeBatch(db);
-      let hasChanges = false;
-
-      for (const docSnap of snapshot.docs) {
-        const data = docSnap.data();
-        
-        // Check for malformed requests
-        if (!data?.from || !data?.receiverId || !data?.status) {
-          console.warn('Found malformed friend request:', docSnap.id);
-          batch.delete(docSnap.ref);
-          hasChanges = true;
-          continue;
-        }
-
-        // Check if users exist
-        const [fromDoc, toDoc] = await Promise.all([
-          getDoc(doc(db, 'users', data.from)),
-          getDoc(doc(db, 'users', data.receiverId))
-        ]);
-
-        if (!fromDoc.exists() || !toDoc.exists()) {
-          console.warn('Found friend request with non-existent users:', docSnap.id);
-          batch.delete(docSnap.ref);
-          hasChanges = true;
-        }
-      }
-
-      if (hasChanges) {
-        await batch.commit();
-        console.log('Cleaned up all malformed friend requests');
-      }
-
-      return { success: true };
-    } catch (error) {
-      console.error('Error cleaning up friend requests:', error);
-      return { success: false, error: error.message };
-    }
-  }
 };

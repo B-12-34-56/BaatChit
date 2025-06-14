@@ -1,4 +1,4 @@
-import { db } from '../utils/firebase';
+import { db, auth } from '../utils/firebase';
 import { doc, setDoc, getDoc, updateDoc, collection, query, where, getDocs, serverTimestamp } from 'firebase/firestore';
 
 // Standard user schema
@@ -15,64 +15,97 @@ import { doc, setDoc, getDoc, updateDoc, collection, query, where, getDocs, serv
 // }
 
 export async function createUserDocument(user) {
-  if (!user?.uid) return;
-  
+  const currentUser = auth.currentUser;
+  if (!currentUser) throw new Error('Not authenticated');
+  const userId = currentUser.uid;
+
   try {
-    const userRef = doc(db, 'users', user.uid);
-    const userSnap = await getDoc(userRef);
-    
-    if (!userSnap.exists()) {
-      await setDoc(userRef, {
-        uid: user.uid,
-        phoneNumber: user.phoneNumber,
-        displayName: user.displayName || '',
-        photoURL: user.photoURL || null,
-        friends: [],
-        createdAt: serverTimestamp(),
-        lastActive: serverTimestamp(),
-        isOnline: false,
-        bio: ''
-      });
-    }
+    const userRef = doc(db, 'users', userId);
+    await setDoc(userRef, {
+      uid: userId,
+      phoneNumber: user.phoneNumber,
+      displayName: user.displayName || `User ${userId}`,
+      displayNameLower: (user.displayName || `User ${userId}`).toLowerCase(),
+      photoURL: user.photoURL || null,
+      friends: [],
+      createdAt: serverTimestamp(),
+      lastActive: serverTimestamp(),
+      isOnline: false,
+      bio: '',
+      twilioVerified: true
+    });
+    return true;
   } catch (error) {
-    console.error('Error creating user document:', error);
+    console.error('[UserService] Error creating user document:', error);
     throw error;
   }
 }
 
-export async function updateUserProfile(uid, data) {
+export async function updateUserProfile(uid, updates) {
+  const currentUser = auth.currentUser;
+  if (!currentUser) throw new Error('Not authenticated');
+  const userId = currentUser.uid;
+
+  if (uid !== userId) {
+    throw new Error('Not authorized to update this profile');
+  }
+
   try {
-    const userRef = doc(db, 'users', uid);
+    const userRef = doc(db, 'users', userId);
     await updateDoc(userRef, {
-      ...data,
-      lastActive: serverTimestamp()
+      ...updates,
+      updatedAt: serverTimestamp()
     });
+    return true;
   } catch (error) {
-    console.error('Error updating user profile:', error);
+    console.error('[UserService] Error updating user profile:', error);
     throw error;
   }
 }
 
 export async function getUserById(uid) {
+  const currentUser = auth.currentUser;
+  if (!currentUser) throw new Error('Not authenticated');
+
   try {
     const userRef = doc(db, 'users', uid);
-    const userSnap = await getDoc(userRef);
-    return userSnap.exists() ? userSnap.data() : null;
+    const userDoc = await getDoc(userRef);
+    
+    if (!userDoc.exists()) {
+      return null;
+    }
+    
+    return {
+      uid: userDoc.id,
+      ...userDoc.data()
+    };
   } catch (error) {
-    console.error('Error getting user by ID:', error);
-    return null;
+    console.error('[UserService] Error getting user by ID:', error);
+    throw error;
   }
 }
 
 export async function searchUsersByphoneNumber(phoneNumber) {
+  const currentUser = auth.currentUser;
+  if (!currentUser) throw new Error('Not authenticated');
+
   try {
     const usersRef = collection(db, 'users');
     const q = query(usersRef, where('phoneNumber', '==', phoneNumber.toLowerCase()));
     const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map(doc => doc.data());
+    
+    if (querySnapshot.empty) {
+      return null;
+    }
+    
+    const userDoc = querySnapshot.docs[0];
+    return {
+      uid: userDoc.id,
+      ...userDoc.data()
+    };
   } catch (error) {
-    console.error('Error searching users by phoneNumber:', error);
-    return [];
+    console.error('[UserService] Error searching users by phoneNumber:', error);
+    throw error;
   }
 }
 
@@ -83,36 +116,59 @@ export async function searchUsers(queryStr) {
 
     // Normalize the query string
     const normalizedQuery = queryStr.trim().toLowerCase();
+    console.log('searchUsers input:', queryStr, 'normalized:', normalizedQuery);
 
     // Search by phone number
     if (normalizedQuery.includes('+') || /^\d+$/.test(normalizedQuery)) {
-      // Remove any non-digit characters except + for phone search
-      const phoneNumber = normalizedQuery.replace(/[^\d+]/g, '');
+      // Format phone number to E.164 format
+      let phoneNumber = normalizedQuery;
+      if (!phoneNumber.startsWith('+')) {
+        // Remove any non-digit characters
+        phoneNumber = phoneNumber.replace(/\D/g, '');
+        // If it starts with 1 and is 11 digits, remove it
+        if (phoneNumber.length === 11 && phoneNumber.startsWith('1')) {
+          phoneNumber = phoneNumber.substring(1);
+        }
+        // Add +1 prefix if not present
+        if (!phoneNumber.startsWith('+')) {
+          phoneNumber = `+1${phoneNumber}`;
+        }
+      }
+      console.log('Searching for phoneNumber:', phoneNumber);
       const phoneQuery = query(usersRef, where('phoneNumber', '==', phoneNumber));
       const phoneSnapshot = await getDocs(phoneQuery);
-      results = [...results, ...phoneSnapshot.docs.map(doc => doc.data())];
+      results = [...results, ...phoneSnapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() }))];
+      // Also try searching without +1 in case it's stored differently
+      if (phoneNumber.startsWith('+1')) {
+        const altPhone = phoneNumber.replace('+1', '');
+        const altQuery = query(usersRef, where('phoneNumber', '==', altPhone));
+        const altSnapshot = await getDocs(altQuery);
+        results = [...results, ...altSnapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() }))];
+      }
     }
 
     // Search by email
     if (normalizedQuery.includes('@')) {
       const emailQuery = query(usersRef, where('email', '==', normalizedQuery));
       const emailSnapshot = await getDocs(emailQuery);
-      results = [...results, ...emailSnapshot.docs.map(doc => doc.data())];
+      results = [...results, ...emailSnapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() }))];
     }
 
-    // Search by display name (only if query is at least 3 characters)
-    if (normalizedQuery.length >= 3) {
+    // Search by display name (only if query is at least 2 characters)
+    if (normalizedQuery.length >= 2) {
+      // Create a compound query for case-insensitive search
       const nameQuery = query(
         usersRef,
-        where('displayName', '>=', normalizedQuery),
-        where('displayName', '<=', normalizedQuery + '\uf8ff')
+        where('displayNameLower', '>=', normalizedQuery),
+        where('displayNameLower', '<=', normalizedQuery + '\uf8ff')
       );
       const nameSnapshot = await getDocs(nameQuery);
-      results = [...results, ...nameSnapshot.docs.map(doc => doc.data())];
+      results = [...results, ...nameSnapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() }))];
     }
 
     // Remove duplicates based on uid
     const uniqueResults = Array.from(new Map(results.map(item => [item.uid, item])).values());
+    console.log('searchUsers results:', uniqueResults);
     return uniqueResults;
   } catch (error) {
     console.error('Error searching users:', error);
@@ -150,6 +206,96 @@ export async function updateLastActive(uid) {
     });
   } catch (error) {
     console.error('Error updating last active:', error);
+    throw error;
+  }
+}
+
+export async function updateUserStatus(isOnline) {
+  const currentUser = auth.currentUser;
+  if (!currentUser) throw new Error('Not authenticated');
+  const userId = currentUser.uid;
+
+  try {
+    const userRef = doc(db, 'users', userId);
+    await updateDoc(userRef, {
+      isOnline,
+      lastActive: serverTimestamp()
+    });
+    return true;
+  } catch (error) {
+    console.error('[UserService] Error updating user status:', error);
+    throw error;
+  }
+}
+
+export async function updateUserLastActive() {
+  const currentUser = auth.currentUser;
+  if (!currentUser) throw new Error('Not authenticated');
+  const userId = currentUser.uid;
+
+  try {
+    const userRef = doc(db, 'users', userId);
+    await updateDoc(userRef, {
+      lastActive: serverTimestamp()
+    });
+    return true;
+  } catch (error) {
+    console.error('[UserService] Error updating user last active:', error);
+    throw error;
+  }
+}
+
+export async function updateUserDisplayName(displayName) {
+  const currentUser = auth.currentUser;
+  if (!currentUser) throw new Error('Not authenticated');
+  const userId = currentUser.uid;
+
+  try {
+    const userRef = doc(db, 'users', userId);
+    await updateDoc(userRef, {
+      displayName,
+      displayNameLower: displayName.toLowerCase(),
+      updatedAt: serverTimestamp()
+    });
+    return true;
+  } catch (error) {
+    console.error('[UserService] Error updating user display name:', error);
+    throw error;
+  }
+}
+
+export async function updateUserBio(bio) {
+  const currentUser = auth.currentUser;
+  if (!currentUser) throw new Error('Not authenticated');
+  const userId = currentUser.uid;
+
+  try {
+    const userRef = doc(db, 'users', userId);
+    await updateDoc(userRef, {
+      bio,
+      updatedAt: serverTimestamp()
+    });
+    return true;
+  } catch (error) {
+    console.error('[UserService] Error updating user bio:', error);
+    throw error;
+  }
+}
+
+export async function updateUserPhotoURL(photoURL) {
+  const currentUser = auth.currentUser;
+  if (!currentUser) throw new Error('Not authenticated');
+  const userId = currentUser.uid;
+
+  try {
+    const userRef = doc(db, 'users', userId);
+    await updateDoc(userRef, {
+      photoURL,
+      updatedAt: serverTimestamp()
+    });
+    return true;
+  } catch (error) {
+    console.error('[UserService] Error updating user photo URL:', error);
     throw error;
   }
 }

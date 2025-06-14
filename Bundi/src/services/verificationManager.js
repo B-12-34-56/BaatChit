@@ -1,12 +1,19 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getAuth, signInWithCustomToken, signOut, onAuthStateChanged } from 'firebase/auth';
-import { doc, setDoc, getFirestore, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, getFirestore, serverTimestamp, getDoc } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
+import { auth } from '../utils/firebase';
+import { db } from '../utils/firebase';
 
 const STORAGE_KEY = 'verificationSession';
 const AUTH_STATE_KEY = 'firebaseAuthState';
 
 class VerificationManager {
+  constructor() {
+    this.currentUser = null;
+    this.verificationSession = null;
+  }
+
   /**
    * Store verification session
    * @param {Object} session - The verification session data
@@ -313,18 +320,10 @@ class VerificationManager {
    * Get current authenticated user
    * @returns {Object|null} - Current user or null
    */
-  static getCurrentUser() {
-    const auth = getAuth();
+  async getCurrentUser() {
     const user = auth.currentUser;
-    if (user) {
-      return {
-        uid: user.uid,
-        phoneNumber: user.phoneNumber,
-        displayName: user.displayName,
-        email: user.email
-      };
-    }
-    return null;
+    if (!user) throw new Error('Not authenticated');
+    return user;
   }
 
   /**
@@ -349,21 +348,187 @@ class VerificationManager {
    * @param {Function} callback - Callback function to handle auth state changes
    * @returns {Function} - Unsubscribe function
    */
-  static onAuthStateChanged(callback) {
-    const auth = getAuth();
-    return onAuthStateChanged(auth, (user) => {
+  async onAuthStateChanged(callback) {
+    return auth.onAuthStateChanged(async (user) => {
       if (user) {
-        callback({
-          uid: user.uid,
-          phoneNumber: user.phoneNumber,
-          displayName: user.displayName,
-          email: user.email
-        });
+        this.currentUser = user;
+        await this.loadVerificationSession();
       } else {
-        callback(null);
+        this.currentUser = null;
+        this.verificationSession = null;
       }
+      callback(user);
     });
+  }
+
+  async loadVerificationSession() {
+    const user = auth.currentUser;
+    if (!user) throw new Error('Not authenticated');
+    const userId = user.uid;
+
+    try {
+      const sessionRef = doc(db, 'verificationSessions', userId);
+      const sessionDoc = await getDoc(sessionRef);
+      
+      if (sessionDoc.exists()) {
+        this.verificationSession = sessionDoc.data();
+      } else {
+        this.verificationSession = null;
+      }
+    } catch (error) {
+      console.error('[VerificationManager] Error loading verification session:', error);
+      this.verificationSession = null;
+    }
+  }
+
+  async handleDeepLink(routeParams) {
+    const user = auth.currentUser;
+    if (!user) throw new Error('Not authenticated');
+    const userId = user.uid;
+
+    try {
+      if (routeParams?.phoneNumber && routeParams?.verificationSid) {
+        await this.saveVerificationSession({
+          phoneNumber: routeParams.phoneNumber,
+          sid: routeParams.verificationSid,
+          timestamp: Date.now()
+        });
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('[VerificationManager] Error handling deep link:', error);
+      return false;
+    }
+  }
+
+  async saveVerificationSession(session) {
+    const user = auth.currentUser;
+    if (!user) throw new Error('Not authenticated');
+    const userId = user.uid;
+
+    try {
+      const sessionRef = doc(db, 'verificationSessions', userId);
+      await setDoc(sessionRef, {
+        ...session,
+        updatedAt: serverTimestamp()
+      });
+      this.verificationSession = session;
+    } catch (error) {
+      console.error('[VerificationManager] Error saving verification session:', error);
+      throw error;
+    }
+  }
+
+  async getVerificationSession() {
+    const user = auth.currentUser;
+    if (!user) throw new Error('Not authenticated');
+    const userId = user.uid;
+
+    try {
+      const sessionRef = doc(db, 'verificationSessions', userId);
+      const sessionDoc = await getDoc(sessionRef);
+      
+      if (!sessionDoc.exists()) {
+        return null;
+      }
+
+      const session = sessionDoc.data();
+      const { phoneNumber, sid, timestamp } = session;
+
+      if (!phoneNumber || !sid || !timestamp) {
+        console.error('[VerificationManager] Invalid session data:', {
+          hasPhoneNumber: !!phoneNumber,
+          hasSid: !!sid,
+          hasTimestamp: !!timestamp
+        });
+        return null;
+      }
+
+      return session;
+    } catch (error) {
+      console.error('[VerificationManager] Error getting verification session:', error);
+      return null;
+    }
+  }
+
+  async verifyPhoneNumber(code) {
+    const user = auth.currentUser;
+    if (!user) throw new Error('Not authenticated');
+    const userId = user.uid;
+
+    try {
+      const session = await this.getVerificationSession();
+      if (!session) {
+        throw new Error('No verification session found');
+      }
+
+      const verifyPhone = httpsCallable(functions, 'verifyPhoneAndCreateToken');
+      const result = await verifyPhone({
+        phoneNumber: session.phoneNumber,
+        code: code,
+        verificationSid: session.verificationSid
+      });
+
+      if (!result.data || !result.data.success) {
+        throw new Error(result.data?.message || 'Verification failed');
+      }
+
+      const { customToken, uid, phoneNumber } = result.data;
+
+      // Sign in with the custom token
+      const userCredential = await signInWithCustomToken(auth, customToken);
+      const newUser = userCredential.user;
+
+      // Update user document
+      const userRef = doc(db, 'users', newUser.uid);
+      await setDoc(userRef, {
+        phoneNumber: phoneNumber,
+        lastLogin: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        twilioVerified: true,
+        displayName: phoneNumber
+      }, { merge: true });
+
+      // Clear verification session
+      await this.saveVerificationSession(null);
+
+      return {
+        success: true,
+        user: newUser
+      };
+    } catch (error) {
+      console.error('[VerificationManager] Error verifying phone number:', error);
+      throw error;
+    }
+  }
+
+  async checkVerificationStatus() {
+    const user = auth.currentUser;
+    if (!user) throw new Error('Not authenticated');
+    const userId = user.uid;
+
+    try {
+      const session = await this.getVerificationSession();
+      if (!session) {
+        return {
+          isVerified: false,
+          phoneNumber: null
+        };
+      }
+
+      return {
+        isVerified: true,
+        phoneNumber: user.phoneNumber
+      };
+    } catch (error) {
+      console.error('[VerificationManager] Error checking verification status:', error);
+      return {
+        isVerified: false,
+        phoneNumber: null
+      };
+    }
   }
 }
 
-export default VerificationManager;
+export const verificationManager = new VerificationManager();

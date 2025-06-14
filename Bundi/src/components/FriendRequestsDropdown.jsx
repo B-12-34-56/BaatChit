@@ -17,7 +17,7 @@ import {
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth } from '../utils/firebase';
 import { db } from '../utils/firebase';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, getDoc, doc } from 'firebase/firestore';
 import { friendRequestService } from '../services/friendRequestService';
 import { getUserById } from '../services/userService';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -44,37 +44,45 @@ const FriendRequestsDropdown = () => {
 
   useEffect(() => {
     if (!currentUser?.uid) return;
-    
+
     let isMounted = true;
     setLoading(true);
     setError(null);
-    
+
+    // Query for incoming friend requests
     const q = query(
-      collection(db, 'friendRequests'), 
-      where('receiverId', '==', currentUser.uid), 
+      collection(db, 'friendRequests'),
+      where('to', '==', currentUser.uid),
       where('status', '==', 'pending')
     );
-    
+
     const unsub = onSnapshot(q, 
       async (snapshot) => {
         if (!isMounted) return;
         
         try {
-          const reqs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          const withUserInfo = await Promise.all(reqs.map(async req => {
+          const reqs = [];
+          for (const doc of snapshot.docs) {
             try {
-              const user = await getUserById(req.from);
-              return { ...req, fromUser: user };
+              const data = doc.data();
+              const fromUser = await getDoc(doc(db, 'users', data.from));
+              if (fromUser.exists()) {
+                reqs.push({
+                  id: doc.id,
+                  ...data,
+                  fromUser: fromUser.data()
+                });
+              }
             } catch (err) {
               console.error('Error fetching user info:', err);
-              return { ...req, fromUser: null };
             }
-          }));
-          setRequests(withUserInfo);
+          }
+          
+          setRequests(reqs);
           setError(null);
 
           // Animate badge for new requests
-          if (withUserInfo.length > requests.length) {
+          if (reqs.length > requests.length) {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             Animated.sequence([
               Animated.timing(badgeAnim, {

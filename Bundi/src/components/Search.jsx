@@ -1,5 +1,5 @@
 // Search.jsx - React Native version
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   View,
   TextInput,
@@ -32,6 +32,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { searchUsers } from '../services/userService';
 import { friendRequestService } from '../services/friendRequestService';
 import Toast from 'react-native-toast-message';
+import { useFocusEffect } from '@react-navigation/native';
 
 const UserSearchComponent = () => {
   const [username, setUsername] = useState("");
@@ -45,9 +46,14 @@ const UserSearchComponent = () => {
   });
   const searchTimeout = React.useRef(null);
 
-  useEffect(() => {
-    loadFriendRequests();
-  }, [currentUser?.uid]);
+  // Reload friend requests when screen is focused
+  useFocusEffect(
+    useCallback(() => {
+      if (currentUser?.uid) {
+        loadFriendRequests();
+      }
+    }, [currentUser?.uid])
+  );
 
   const loadFriendRequests = async () => {
     if (!currentUser?.uid) return;
@@ -56,6 +62,23 @@ const UserSearchComponent = () => {
         friendRequestService.getIncomingRequests(currentUser.uid),
         friendRequestService.getOutgoingRequests(currentUser.uid)
       ]);
+
+      // Fetch user details for incoming requests
+      const incomingWithDetails = await Promise.all(
+        incoming.map(async (request) => {
+          const userDoc = await getDoc(doc(db, 'users', request.from));
+          const userData = userDoc.data();
+          return {
+            ...request,
+            senderInfo: {
+              displayName: userData?.displayName || 'Unknown User',
+              email: userData?.email || '',
+              phoneNumber: userData?.phoneNumber || '',
+              photoURL: userData?.photoURL || null
+            }
+          };
+        })
+      );
 
       // Fetch user details for outgoing requests
       const outgoingWithDetails = await Promise.all(
@@ -75,11 +98,16 @@ const UserSearchComponent = () => {
       );
 
       setFriendRequests({
-        incoming,
+        incoming: incomingWithDetails,
         outgoing: outgoingWithDetails
       });
     } catch (error) {
       console.error('Error loading friend requests:', error);
+      Toast.show({
+        type: 'error',
+        text1: 'Failed to load friend requests',
+        text2: error.message || 'Please try again'
+      });
     }
   };
 
@@ -88,20 +116,20 @@ const UserSearchComponent = () => {
       clearTimeout(searchTimeout.current);
     }
 
-    searchTimeout.current = setTimeout(async () => {
-      if (!username.trim()) {
-        setUser(null);
-        setLoading(false);
-        return;
-      }
-
-      setErr(false);
+    if (!username.trim()) {
       setUser(null);
-      setLoading(true);
-      
+      setLoading(false);
+      return;
+    }
+
+    setErr(false);
+    setUser(null);
+    setLoading(true);
+
+    searchTimeout.current = setTimeout(async () => {
       try {
-        // Don't search if query is too short
-        if (username.length < 3) {
+        // Don't search if query is too short (unless it's a phone number or email)
+        if (username.length < 2 && !username.includes('@') && !/^\d+$/.test(username)) {
           setLoading(false);
           return;
         }
@@ -121,14 +149,36 @@ const UserSearchComponent = () => {
       } catch (error) {
         console.error('Search error:', error);
         setErr(true);
+        Toast.show({
+          type: 'error',
+          text1: 'Search failed',
+          text2: error.message || 'Please try again'
+        });
       } finally {
         setLoading(false);
       }
-    }, 300); // Reduced debounce time for better responsiveness
+    }, 500); // Increased debounce time to reduce unnecessary searches
   };
+
+  // Clear search when component unmounts
+  useEffect(() => {
+    return () => {
+      if (searchTimeout.current) {
+        clearTimeout(searchTimeout.current);
+      }
+    };
+  }, []);
 
   const handleFriendRequest = async (selectedUser) => {
     try {
+      if (!selectedUser?.uid) {
+        Toast.show({
+          type: 'error',
+          text1: 'Invalid user selected',
+        });
+        return;
+      }
+
       const result = await friendRequestService.sendFriendRequest(currentUser.uid, selectedUser.uid);
       
       if (result.success) {
@@ -138,6 +188,8 @@ const UserSearchComponent = () => {
         });
         setUser(null);
         setUsername("");
+        // Reload friend requests to update the UI
+        loadFriendRequests();
       } else {
         Toast.show({
           type: 'error',
@@ -149,6 +201,7 @@ const UserSearchComponent = () => {
       Toast.show({
         type: 'error',
         text1: 'Failed to send friend request',
+        text2: err.message || 'Please try again'
       });
     }
   };
@@ -227,6 +280,7 @@ const UserSearchComponent = () => {
 
   const renderUserItem = ({ item }) => (
     <TouchableOpacity
+      key={item.uid}
       onPress={() => handleFriendRequest(item)}
       style={{
         flexDirection: 'row',
@@ -244,7 +298,9 @@ const UserSearchComponent = () => {
       }}
     >
       <Image 
-        source={{ uri: item.photoURL || 'https://ui-avatars.com/api/?name=' + (item.displayName || 'User') }} 
+        source={{ 
+          uri: item.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(item.displayName || item.phoneNumber || 'User')}&background=667eea&color=fff` 
+        }} 
         style={{ 
           width: 36, 
           height: 36, 
@@ -258,8 +314,17 @@ const UserSearchComponent = () => {
           fontSize: 15, 
           color: '#3a3a5a' 
         }}>
-          {item.displayName || 'Unknown User'}
+          {item.displayName || item.phoneNumber || 'Unknown User'}
         </Text>
+        {item.phoneNumber && (
+          <Text style={{ 
+            fontSize: 13, 
+            color: '#888',
+            marginTop: 2
+          }}>
+            {item.phoneNumber}
+          </Text>
+        )}
         {item.email && (
           <Text style={{ 
             fontSize: 13, 
@@ -287,22 +352,27 @@ const UserSearchComponent = () => {
   );
 
   const renderFriendRequestItem = ({ item }) => (
-    <View style={{
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: 14,
-      paddingVertical: 10,
-      borderRadius: 10,
-      backgroundColor: '#fff',
-      marginTop: 8,
-      shadowColor: '#2c3e50',
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.06,
-      shadowRadius: 4,
-      elevation: 2,
-    }}>
+    <View 
+      key={item.id}
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 14,
+        paddingVertical: 10,
+        borderRadius: 10,
+        backgroundColor: '#fff',
+        marginTop: 8,
+        shadowColor: '#2c3e50',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.06,
+        shadowRadius: 4,
+        elevation: 2,
+      }}
+    >
       <Image 
-        source={{ uri: item.senderInfo?.photoURL || 'https://ui-avatars.com/api/?name=' + (item.senderInfo?.displayName || 'User') }} 
+        source={{ 
+          uri: item.senderInfo?.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(item.senderInfo?.displayName || item.senderInfo?.phoneNumber || 'User')}&background=667eea&color=fff` 
+        }} 
         style={{ 
           width: 36, 
           height: 36, 
@@ -316,15 +386,26 @@ const UserSearchComponent = () => {
           fontSize: 15, 
           color: '#3a3a5a' 
         }}>
-          {item.senderInfo?.displayName || 'Unknown User'}
+          {item.senderInfo?.displayName || item.senderInfo?.phoneNumber || 'Unknown User'}
         </Text>
-        <Text style={{ 
-          fontSize: 13, 
-          color: '#888',
-          marginTop: 2
-        }}>
-          {item.senderInfo?.email || item.senderInfo?.phoneNumber || 'No contact info'}
-        </Text>
+        {item.senderInfo?.phoneNumber && (
+          <Text style={{ 
+            fontSize: 13, 
+            color: '#888',
+            marginTop: 2
+          }}>
+            {item.senderInfo.phoneNumber}
+          </Text>
+        )}
+        {item.senderInfo?.email && (
+          <Text style={{ 
+            fontSize: 13, 
+            color: '#888',
+            marginTop: 2
+          }}>
+            {item.senderInfo.email}
+          </Text>
+        )}
         <Text style={{ 
           fontSize: 13, 
           color: '#888',

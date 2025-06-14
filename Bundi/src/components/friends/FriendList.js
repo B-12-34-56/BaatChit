@@ -25,7 +25,7 @@ import { Ionicons } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';
 import * as Haptics from 'expo-haptics';
 import { useFocusEffect } from '@react-navigation/native';
-import { doc, onSnapshot, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, where, getDocs, runTransaction, getDoc } from 'firebase/firestore';
 
 const FriendList = () => {
   const [currentUser] = useAuthState(auth);
@@ -60,43 +60,49 @@ const FriendList = () => {
         if (!userDoc.exists()) {
           console.log('User document not found');
           setFriends([]);
+          setLoading(false);
           return;
         }
 
         const userData = userDoc.data();
         const friendUids = userData.friends || [];
+        console.log('Friend UIDs:', friendUids);
 
         if (!friendUids.length) {
           console.log('No friends found');
           setFriends([]);
+          setLoading(false);
           return;
         }
 
-        // Get friend profiles
-        const friendsQuery = query(
-          collection(db, 'users'),
-          where('uid', 'in', friendUids)
-        );
-
-        const friendsSnapshot = await getDocs(friendsQuery);
-        const friendsList = friendsSnapshot.docs.map(doc => ({
-          uid: doc.id,
-          ...doc.data()
-        }));
+        // Get friend documents one by one
+        const friendsList = [];
+        for (const friendUid of friendUids) {
+          try {
+            const friendDoc = await getDoc(doc(db, 'users', friendUid));
+            if (friendDoc.exists()) {
+              friendsList.push({
+                uid: friendDoc.id,
+                ...friendDoc.data()
+              });
+            }
+          } catch (err) {
+            console.error(`Error fetching friend ${friendUid}:`, err);
+            // Continue with other friends even if one fails
+          }
+        }
 
         if (isMounted) {
           setFriends(friendsList);
           setError(null);
+          setLoading(false);
         }
       } catch (err) {
         console.error('Error fetching friends:', err);
         if (isMounted) {
           setError('Failed to load friends');
-          Toast.show({
-            type: 'error',
-            text1: 'Error loading friends',
-            text2: err.message
-          });
+          setLoading(false);
+          setRefreshing(false);
         }
       } finally {
         if (isMounted) {
@@ -138,21 +144,31 @@ const FriendList = () => {
           style: 'destructive',
           onPress: async () => {
             try {
+              setLoading(true);
               if (Platform.OS === 'ios') {
                 Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
               }
-              await friendRequestService.removeFriend(currentUser.uid, friend.uid);
-              Toast.show({
-                type: 'success',
-                text1: 'Friend removed',
-              });
+              
+              const result = await friendRequestService.removeFriend(currentUser.uid, friend.uid);
+              
+              if (result.success) {
+                Toast.show({
+                  type: 'success',
+                  text1: 'Friend removed successfully',
+                  text2: 'You can add them back anytime'
+                });
+              } else {
+                throw new Error(result.message);
+              }
             } catch (err) {
               console.error('Error removing friend:', err);
               Toast.show({
                 type: 'error',
                 text1: 'Failed to remove friend',
-                text2: err.message
+                text2: err.message || 'Please try again later'
               });
+            } finally {
+              setLoading(false);
             }
           },
         },
@@ -166,8 +182,24 @@ const FriendList = () => {
       if (Platform.OS === 'ios') {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       }
-      // Create/get conversation
-      const conversationId = await messageService.createConversation(currentUser.uid, friend.uid);
+      
+      // Create/get conversation using transaction
+      const conversationId = await runTransaction(db, async (transaction) => {
+        const conversationId = [currentUser.uid, friend.uid].sort().join('_');
+        const conversationRef = doc(db, 'conversations', conversationId);
+        const conversationDoc = await transaction.get(conversationRef);
+        
+        if (!conversationDoc.exists()) {
+          transaction.set(conversationRef, {
+            participants: [currentUser.uid, friend.uid],
+            createdAt: new Date(),
+            lastMessage: null,
+            lastMessageTime: null
+          });
+        }
+        
+        return conversationId;
+      });
       
       // Update chat context to open the chat
       dispatch({
@@ -189,10 +221,11 @@ const FriendList = () => {
       Toast.show({
         type: 'error',
         text1: 'Failed to start chat',
-        text2: err.message
+        text2: err.message || 'Please try again later'
       });
+    } finally {
+      setChatLoading('');
     }
-    setChatLoading('');
   };
 
   const handleAddFriend = async () => {
@@ -323,16 +356,30 @@ const FriendList = () => {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#667eea" />
+        <Text style={{ marginTop: 12, color: '#888' }}>Loading friends...</Text>
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={styles.loadingContainer}>
+        <Text style={{ color: '#f44336' }}>{error}</Text>
+      </View>
+    );
+  }
+
+  if (!friends.length) {
+    return (
+      <View style={styles.loadingContainer}>
+        <Ionicons name="people-outline" size={48} color="#667eea" />
+        <Text style={{ color: '#888', marginTop: 12 }}>No friends yet. Add some friends to start chatting!</Text>
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
-      {error && (
-        <Text style={styles.errorText}>{error}</Text>
-      )}
-
       <FlatList
         data={friends}
         renderItem={renderFriend}
@@ -345,18 +392,6 @@ const FriendList = () => {
             colors={['#667eea']}
             tintColor="#667eea"
           />
-        }
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <Ionicons name="people-outline" size={48} color="#667eea" />
-            <Text style={styles.emptyText}>No friends yet</Text>
-            <TouchableOpacity
-              style={styles.addButton}
-              onPress={() => setAddModalVisible(true)}
-            >
-              <Text style={styles.addButtonText}>Add Friends</Text>
-            </TouchableOpacity>
-          </View>
         }
       />
 

@@ -68,22 +68,35 @@ exports.verifyPhoneAndCreateToken = functions.https.onCall(async (data, context)
       );
     }
 
-    // Step 2: Create or get user record
-    const uid = phoneNumber.replace(/\D/g, ''); // Use phone digits as UID
+    // Step 2: Generate a proper Firebase-style UID
+    const properUid = admin.firestore().collection('users').doc().id;
+    console.log('Generated proper UID:', properUid);
 
     try {
-      // Try to get existing user
-      await admin.auth().getUser(uid);
-      console.log('Found existing user:', uid);
+      // Try to get existing user by phone number
+      const userRecord = await admin.auth().getUserByPhoneNumber(phoneNumber);
+      console.log('Found existing user:', userRecord.uid);
+      
+      // If user exists, use their existing UID
+      const uid = userRecord.uid;
+      
+      // Update user's storageUid if it doesn't exist
+      const userDoc = await admin.firestore().collection('users').doc(uid).get();
+      if (!userDoc.exists || !userDoc.data().storageUid) {
+        await admin.firestore().collection('users').doc(uid).set({
+          storageUid: properUid,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+      }
     } catch (error) {
       if (error.code === 'auth/user-not-found') {
-        // Create new user with phone number
+        // Create new user with proper UID
         await admin.auth().createUser({
-          uid: uid,
+          uid: properUid,
           phoneNumber: phoneNumber,
           displayName: phoneNumber,
         });
-        console.log('Created new user:', uid);
+        console.log('Created new user with proper UID:', properUid);
       } else {
         throw error;
       }
@@ -91,19 +104,20 @@ exports.verifyPhoneAndCreateToken = functions.https.onCall(async (data, context)
 
     // Step 3: Generate custom token
     try {
-      const customToken = await admin.auth().createCustomToken(uid, {
+      const customToken = await admin.auth().createCustomToken(properUid, {
         phoneNumber: phoneNumber,
         verifiedAt: admin.firestore.Timestamp.now(),
         provider: 'twilio'
       });
 
       // Step 4: Store user data in Firestore
-      await admin.firestore().collection('users').doc(uid).set({
+      await admin.firestore().collection('users').doc(properUid).set({
         phoneNumber: phoneNumber,
         lastLogin: admin.firestore.Timestamp.now(),
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         authProvider: 'twilio',
-        isPhoneVerified: true
+        isPhoneVerified: true,
+        storageUid: properUid // Store the proper UID
       }, { merge: true });
 
       console.log('Successfully created custom token for:', phoneNumber);
@@ -111,7 +125,7 @@ exports.verifyPhoneAndCreateToken = functions.https.onCall(async (data, context)
       return {
         success: true,
         customToken: customToken,
-        uid: uid,
+        uid: properUid,
         phoneNumber: phoneNumber
       };
     } catch (error) {
@@ -187,6 +201,88 @@ exports.initiatePhoneVerification = functions.https.onCall(async (data, context)
     throw new functions.https.HttpsError(
       'internal',
       'Failed to initiate phone verification: ' + error.message
+    );
+  }
+});
+
+/**
+ * Migrate existing users to have proper UIDs
+ * This function should be called manually from the Firebase Console
+ */
+exports.migrateUserUids = functions.https.onCall(async (data, context) => {
+  try {
+    // Only allow admin to run this function
+    if (!context.auth?.token?.admin) {
+      throw new functions.https.HttpsError(
+        'permission-denied',
+        'Only administrators can run this function'
+      );
+    }
+
+    const db = admin.firestore();
+    const usersRef = db.collection('users');
+    const usersSnapshot = await usersRef.get();
+    
+    let migratedCount = 0;
+    let errorCount = 0;
+    const errors = [];
+
+    for (const userDoc of usersSnapshot.docs) {
+      try {
+        const userData = userDoc.data();
+        
+        // Skip if user already has a storageUid
+        if (userData.storageUid) {
+          continue;
+        }
+
+        // Generate new proper UID
+        const properUid = db.collection('users').doc().id;
+        
+        // Update user document with new storageUid
+        await userDoc.ref.set({
+          storageUid: properUid,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+
+        // If the user has a phone number, try to update their auth record
+        if (userData.phoneNumber) {
+          try {
+            const userRecord = await admin.auth().getUserByPhoneNumber(userData.phoneNumber);
+            if (userRecord) {
+              // Update custom claims to include storageUid
+              await admin.auth().setCustomUserClaims(userRecord.uid, {
+                storageUid: properUid
+              });
+            }
+          } catch (authError) {
+            console.warn(`Could not update auth record for user ${userDoc.id}:`, authError);
+          }
+        }
+
+        migratedCount++;
+      } catch (error) {
+        errorCount++;
+        errors.push({
+          userId: userDoc.id,
+          error: error.message
+        });
+        console.error(`Error migrating user ${userDoc.id}:`, error);
+      }
+    }
+
+    return {
+      success: true,
+      migratedCount,
+      errorCount,
+      errors
+    };
+
+  } catch (error) {
+    console.error('Error in migrateUserUids:', error);
+    throw new functions.https.HttpsError(
+      'internal',
+      'Failed to migrate user UIDs: ' + error.message
     );
   }
 });

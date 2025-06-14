@@ -1,18 +1,58 @@
 rules_version = '2';
-
 service firebase.storage {
   match /b/{bucket}/o {
-    // Allow all authenticated users to read/write to media folder
-    match /media/{allPaths=**} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null 
-        && request.resource.size < 5 * 1024 * 1024
-        && request.resource.contentType.matches('image/.*');
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
     }
-    
-    // Fallback for any other paths
+
+    // Helper function to check if user is accessing their own data
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Allow users to read and write their own profile images
+    match /profile_images/{userId}/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner(userId);
+    }
+
+    // Allow users to read and write chat images
+    match /chat_images/{conversationId}/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+
+    // Allow users to read and write message attachments
+    match /message_attachments/{conversationId}/{messageId}/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+
+    // Allow users to read and write any files in their own directory
+    match /users/{userId}/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner(userId);
+    }
+
+    // Allow users to read and write any files in conversations they're part of
+    match /conversations/{conversationId}/{allPaths=**} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Allow users to read and write any files in chats they're part of
+    match /chats/{chatId}/{allPaths=**} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Allow users to read and write only to their own uploads directory
+    match /uploads/{userId}/{allPaths=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Disallow all other uploads fallback patterns
     match /{allPaths=**} {
-      allow read, write: if request.auth != null;
+      allow read, write: if false;
     }
   }
-} 
+}

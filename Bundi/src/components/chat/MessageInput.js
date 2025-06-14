@@ -16,36 +16,28 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as Crypto from 'expo-crypto';
+import * as FileSystem from 'expo-file-system';
 import { ChatContext } from '../../context/ChatContext';
 import { useAuthState } from 'react-firebase-hooks/auth';
-import { auth } from '../../utils/firebase';
+import { auth, uploadImageWithFileSystem } from '../../utils/firebase';
 import { messageService } from '../../services/messageService';
-import { getStorage, ref, uploadBytes, getDownloadURL, uploadString } from "firebase/storage";
 import { getFirestore, doc, getDoc, setDoc, updateDoc, serverTimestamp, collection, getDocs, query, where, limit, orderBy } from "firebase/firestore";
 import { getAuth } from 'firebase/auth';
+import { getStorage, ref, uploadString, getDownloadURL } from "firebase/storage";
+import authService from '../../services/authService';
 
 // Get file hash using expo-crypto
 async function getFileHash(uri) {
   try {
-    // Fetch the image data
-    const response = await fetch(uri);
-    const blob = await response.blob();
-    
-    // Convert blob to base64
-    const reader = new FileReader();
-    const base64 = await new Promise((resolve, reject) => {
-      reader.onloadend = () => resolve(reader.result);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
+    // Read file as base64 using expo-file-system
+    const base64 = await FileSystem.readAsStringAsync(uri, {
+      encoding: FileSystem.EncodingType.Base64,
     });
-    
-    // Remove the data URL prefix to get just the base64 string
-    const base64Data = base64.split(',')[1];
     
     // Use expo-crypto to generate SHA-256 hash from base64 string
     const hash = await Crypto.digestStringAsync(
       Crypto.CryptoDigestAlgorithm.SHA256,
-      base64Data
+      base64
     );
     return hash;
   } catch (error) {
@@ -248,9 +240,7 @@ async function checkDuplicateAcrossDevices(fileHash, retryCount = 0) {
         totalCount: exactData.count || 0,
         detectionMethod: 'exact_hash',
         firstUploaderName: exactData.firstUploaderName,
-        allUploads: exactData.uploads || [],
-        relatedHashes: [fileHash],
-        performanceMs: duration
+        uploads: exactData.uploads || []
       };
     }
     
@@ -402,10 +392,10 @@ async function handleCrossDeviceUpload(imageUri, imageFile, currentUser) {
       };
     }
     
-    // Step 4: Upload to storage
+    // Step 4: Upload to storage using FileSystem method
     console.log('Uploading to Firebase Storage...');
     const uploadStorageStartTime = performance.now();
-    const imageUrl = await uploadImageToFirebase(imageUri, currentUser.uid, fileHash, imageFile);
+    const imageUrl = await uploadImageWithFileSystem(imageUri);
     const uploadStorageDuration = performance.now() - uploadStorageStartTime;
     console.log(`Storage upload completed in ${uploadStorageDuration.toFixed(2)}ms`);
     
@@ -526,145 +516,6 @@ async function incrementUploadLog(userId, userName, fileHash, fileName) {
   }
 }
 
-async function uploadImageToFirebase(imageUri, userId, fileHash, imageFile) {
-  try {
-    // Verify authentication state
-    const auth = getAuth();
-    if (!auth.currentUser) {
-      throw new Error('User not authenticated');
-    }
-
-    console.log('Starting Firebase upload...');
-    console.log('Image URI:', imageUri);
-    console.log('User ID:', userId);
-    console.log('File Hash:', fileHash);
-    console.log('Image File:', imageFile);
-    console.log('Auth State:', {
-      isAuthenticated: !!auth.currentUser,
-      uid: auth.currentUser?.uid,
-      phoneNumber: auth.currentUser?.phoneNumber,
-      email: auth.currentUser?.email
-    });
-
-    const storage = getStorage();
-    
-    // CRITICAL FIX: Don't use phone number UID in path
-    // Generate a Firebase-compatible ID
-    const timestamp = Date.now();
-    const randomId = Math.random().toString(36).substring(2, 15);
-    const safeUserId = `ph_${timestamp}_${randomId}`; // Prefix with 'ph_' for phone users
-    
-    // Use a completely different path structure
-    const fileName = `img_${timestamp}_${fileHash.substring(0, 8)}.jpg`;
-    const path = `media/${safeUserId}/${fileName}`;
-    
-    console.log('Storage path:', path);
-    
-    const storageRef = ref(storage, path);
-    console.log('Storage reference created');
-    
-    // Get blob from URI
-    console.log('Fetching image blob...');
-    const response = await fetch(imageUri);
-    console.log('Fetch response status:', response.status);
-    const blob = await response.blob();
-    console.log('Blob created, size:', blob.size);
-
-    // Verify blob size and type
-    if (blob.size > 5 * 1024 * 1024) {
-      throw new Error('File size exceeds 5MB limit');
-    }
-    if (!blob.type.startsWith('image/')) {
-      throw new Error('File must be an image');
-    }
-
-    // Upload blob with metadata
-    console.log('Uploading to Firebase...');
-    const metadata = {
-      contentType: blob.type || 'image/jpeg',
-      customMetadata: {
-        originalUserId: userId, // Store the actual phone UID here
-        phoneNumber: auth.currentUser?.phoneNumber || 'unknown',
-        fileHash: fileHash,
-        uploadTime: new Date().toISOString()
-      }
-    };
-
-    const snapshot = await uploadBytes(storageRef, blob, metadata);
-    console.log('Upload completed, getting download URL...');
-    
-    const downloadURL = await getDownloadURL(snapshot.ref);
-    console.log('Download URL obtained:', downloadURL);
-    
-    return downloadURL;
-  } catch (error) {
-    console.error('Detailed Firebase upload error:', {
-      code: error.code,
-      message: error.message,
-      serverResponse: error.serverResponse,
-      stack: error.stack,
-      auth: {
-        currentUser: auth.currentUser ? {
-          uid: auth.currentUser.uid,
-          phoneNumber: auth.currentUser.phoneNumber,
-          email: auth.currentUser.email,
-          isAnonymous: auth.currentUser.isAnonymous
-        } : null
-      }
-    });
-    
-    // More specific error handling
-    if (error.code === 'storage/unauthorized') {
-      throw new Error('Storage error: You are not authorized to upload files');
-    } else if (error.code === 'storage/unknown') {
-      throw new Error('Storage error: Check if path matches storage rules');
-    } else if (error.code === 'storage/quota-exceeded') {
-      throw new Error('Storage error: Quota exceeded');
-    } else if (error.code === 'storage/invalid-checksum') {
-      throw new Error('Storage error: Invalid file checksum');
-    }
-    
-    throw error;
-  }
-}
-
-// Alternative upload method using putString
-async function alternativeUpload(imageUri, userId, fileHash, imageFile) {
-  try {
-    const storage = getStorage();
-    
-    // Convert to base64
-    const response = await fetch(imageUri);
-    const blob = await response.blob();
-    
-    const reader = new FileReader();
-    const base64 = await new Promise((resolve, reject) => {
-      reader.onloadend = () => resolve(reader.result);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-    
-    // Try uploading as base64 string
-    const timestamp = Date.now();
-    const path = `base64uploads/${timestamp}.jpg`;
-    const storageRef = ref(storage, path);
-    
-    console.log('Trying base64 upload to:', path);
-    
-    // Upload using putString
-    const snapshot = await uploadString(storageRef, base64, 'data_url');
-    const downloadURL = await getDownloadURL(snapshot.ref);
-    
-    console.log('Base64 upload successful:', downloadURL);
-    
-    return downloadURL;
-    
-  } catch (error) {
-    console.error('Alternative upload also failed:', error);
-    throw error;
-  }
-}
-
 // Add this function BEFORE the MessageInput component
 async function waitForSimilarityProcessing(fileHash, maxChecks = 3, checkInterval = 3000) {
   const db = getFirestore();
@@ -691,6 +542,112 @@ async function waitForSimilarityProcessing(fileHash, maxChecks = 3, checkInterva
   console.log('⏱️ Similarity processing timeout - proceeding with available data');
   return false;
 }
+
+// Add this test function to isolate the issue
+const minimalStorageTest = async () => {
+  try {
+    console.log('🧪 Running minimal storage test...');
+    const auth = getAuth();
+    const storage = getStorage();
+    // Step 1: Verify we're authenticated
+    if (!auth.currentUser) {
+      console.error('❌ No authenticated user!');
+      return;
+    }
+    console.log('✅ Authenticated as:', auth.currentUser.uid);
+    // Step 2: Check Firebase app configuration
+    console.log('📱 Firebase App Config:', {
+      name: storage.app.name,
+      projectId: storage.app.options.projectId,
+      storageBucket: storage.app.options.storageBucket,
+      apiKey: storage.app.options.apiKey ? '✅ Present' : '❌ Missing',
+      authDomain: storage.app.options.authDomain
+    });
+    // Step 3: Try the absolute simplest upload possible
+    const testString = 'Hello Firebase';
+    const testPath = `test_${Date.now()}.txt`;
+    const storageRef = ref(storage, testPath);
+    console.log('📤 Attempting to upload text string to:', testPath);
+    try {
+      // Method 1: uploadString with raw text
+      await uploadString(storageRef, testString);
+      console.log('✅ Text upload successful!');
+      const url = await getDownloadURL(storageRef);
+      console.log('📎 Download URL:', url);
+      Alert.alert('Success!', 'Basic upload works! The issue is with image handling.');
+    } catch (uploadError) {
+      console.error('❌ Text upload failed:', {
+        code: uploadError.code,
+        message: uploadError.message,
+        serverResponse: uploadError.serverResponse,
+        customData: uploadError.customData
+      });
+      // Try to get more error details
+      if (uploadError.serverResponse) {
+        try {
+          const errorDetails = JSON.parse(uploadError.serverResponse);
+          console.error('Server error details:', errorDetails);
+        } catch (e) {
+          console.error('Raw server response:', uploadError.serverResponse);
+        }
+      }
+      // Check if it's a bucket issue
+      if (uploadError.code === 'storage/unknown' && !storage.app.options.storageBucket) {
+        Alert.alert(
+          'Configuration Error',
+          'No storage bucket configured. Check Firebase Console → Storage'
+        );
+      } else {
+        Alert.alert(
+          'Upload Failed',
+          `${uploadError.code || 'Unknown error'}: ${uploadError.message}`
+        );
+      }
+    }
+    // Step 4: Test if we can at least create a reference
+    try {
+      const testRef2 = ref(storage, 'test/file.txt');
+      console.log('✅ Can create storage reference:', testRef2.fullPath);
+    } catch (refError) {
+      console.error('❌ Cannot even create reference:', refError);
+    }
+  } catch (error) {
+    console.error('🚨 Test failed:', error);
+    Alert.alert('Test Error', error.message);
+  }
+};
+
+// Also add this function to check if storage is initialized
+const checkStorageInit = () => {
+  try {
+    const storage = getStorage();
+    const auth = getAuth();
+    console.log('🔍 Storage initialization check:');
+    console.log('Storage app:', storage.app);
+    console.log('Storage bucket:', storage._bucket || storage.app.options.storageBucket);
+    console.log('Auth app:', auth.app);
+    console.log('Apps match:', storage.app === auth.app);
+    // Check if Firebase was initialized properly
+    const app = storage.app;
+    console.log('Firebase app options:', {
+      apiKey: !!app.options.apiKey,
+      authDomain: app.options.authDomain,
+      projectId: app.options.projectId,
+      storageBucket: app.options.storageBucket,
+      messagingSenderId: !!app.options.messagingSenderId,
+      appId: !!app.options.appId
+    });
+    if (!app.options.storageBucket) {
+      console.error('❌ CRITICAL: No storage bucket in Firebase config!');
+      Alert.alert(
+        'Configuration Error',
+        'storageBucket is missing from Firebase configuration. Add it to your firebase.js config.'
+      );
+    }
+  } catch (error) {
+    console.error('Storage init check error:', error);
+  }
+};
 
 const MessageInput = () => {
   const { data } = useContext(ChatContext);
@@ -757,7 +714,7 @@ const MessageInput = () => {
     if ((!text.trim() && !imageUri) || !data.chatId || uploading) return;
     
     // Check if image is blocked
-    if (duplicateModalData && duplicateModalData.totalCount >= 2) {  // Changed from >= 3
+    if (duplicateModalData && duplicateModalData.totalCount >= 2) {
       Alert.alert(
         'Upload Blocked',
         `This image has already been uploaded ${duplicateModalData.totalCount} times. Maximum allowed is 2.`,
@@ -1202,24 +1159,43 @@ const MessageInput = () => {
     >
       {/* Add the debug buttons */}
       {__DEV__ && (
-        <View style={{flexDirection: 'row', justifyContent: 'space-around', padding: 10}}>
-          <TouchableOpacity 
-            onPress={testDuplicateSystem}
-            style={{backgroundColor: '#ff6b6b', padding: 10, borderRadius: 5, flex: 1, marginRight: 5}}
-          >
-            <Text style={{color: 'white', textAlign: 'center', fontWeight: 'bold'}}>
-              🔧 Test System
-            </Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            onPress={testCrossDeviceDetection}
-            style={{backgroundColor: '#4a90e2', padding: 10, borderRadius: 5, flex: 1, marginLeft: 5}}
-          >
-            <Text style={{color: 'white', textAlign: 'center', fontWeight: 'bold'}}>
-              🔄 Test Cross-Device
-            </Text>
-          </TouchableOpacity>
+        <View style={{flexDirection: 'column', padding: 10}}>
+          <View style={{flexDirection: 'row', justifyContent: 'space-around', marginBottom: 5}}>
+            <TouchableOpacity 
+              onPress={testDuplicateSystem}
+              style={{backgroundColor: '#ff6b6b', padding: 10, borderRadius: 5, flex: 1, marginRight: 5}}
+            >
+              <Text style={{color: 'white', textAlign: 'center', fontWeight: 'bold'}}>
+                🔧 Test System
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              onPress={testCrossDeviceDetection}
+              style={{backgroundColor: '#4a90e2', padding: 10, borderRadius: 5, flex: 1, marginLeft: 5}}
+            >
+              <Text style={{color: 'white', textAlign: 'center', fontWeight: 'bold'}}>
+                🔄 Test Cross-Device
+              </Text>
+            </TouchableOpacity>
+          </View>
+          <View style={{flexDirection: 'row', justifyContent: 'space-around'}}>
+            <TouchableOpacity 
+              onPress={minimalStorageTest}
+              style={{backgroundColor: '#10b981', padding: 10, borderRadius: 5, flex: 1, marginRight: 5}}
+            >
+              <Text style={{color: 'white', textAlign: 'center', fontWeight: 'bold'}}>
+                🧪 Test Storage
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              onPress={checkStorageInit}
+              style={{backgroundColor: '#8b5cf6', padding: 10, borderRadius: 5, flex: 1, marginLeft: 5}}
+            >
+              <Text style={{color: 'white', textAlign: 'center', fontWeight: 'bold'}}>
+                🔍 Check Config
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
       )}
       

@@ -1,69 +1,79 @@
-import React, { useEffect, useState, useContext } from 'react';
-import { View, Text, TouchableOpacity, FlatList, Image, StyleSheet, Alert, ActivityIndicator, Platform } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  View,
+  Text,
+  FlatList,
+  TouchableOpacity,
+  Image,
+  StyleSheet,
+  ActivityIndicator,
+  RefreshControl,
+  Alert,
+  Platform
+} from 'react-native';
 import { useAuthState } from 'react-firebase-hooks/auth';
-import { auth } from '../../utils/firebase';
-import { db } from '../../utils/firebase';
-import { collection, query, where, onSnapshot, doc, getDoc } from 'firebase/firestore';
+import { auth, db } from '../../utils/firebase';
 import { friendRequestService } from '../../services/friendRequestService';
-import { messageService } from '../../services/messageService';
-import { getUserById } from '../../services/userService';
-import { ChatContext } from '../../context/ChatContext';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';
 import * as Haptics from 'expo-haptics';
+import { doc, onSnapshot, collection, query, where } from 'firebase/firestore';
 
 const FriendRequests = () => {
   const [currentUser] = useAuthState(auth);
   const [incomingRequests, setIncomingRequests] = useState([]);
   const [outgoingRequests, setOutgoingRequests] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
   const [loadingId, setLoadingId] = useState(null);
-  const [chatLoading, setChatLoading] = useState('');
-  const { dispatch } = useContext(ChatContext);
 
+  // Subscribe to real-time friend request updates
   useEffect(() => {
     if (!currentUser?.uid) return;
-    
+
     let isMounted = true;
     setLoading(true);
     setError(null);
-    
+
     // Subscribe to incoming requests
     const incomingQuery = query(
-      collection(db, 'friendRequests'), 
-      where('receiverId', '==', currentUser.uid), 
+      collection(db, 'friendRequests'),
+      where('receiverId', '==', currentUser.uid),
       where('status', '==', 'pending')
     );
-    
-    const incomingUnsub = onSnapshot(incomingQuery, 
-      async (snapshot) => {
-        if (!isMounted) return;
-        
-        try {
-          const reqs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          const withUserInfo = await Promise.all(reqs.map(async req => {
-            try {
-              const user = await getUserById(req.from);
-              return { ...req, fromUser: user };
-            } catch (err) {
-              console.error('Error fetching user info:', err);
-              return { ...req, fromUser: null };
+
+    const incomingUnsubscribe = onSnapshot(incomingQuery, async (snapshot) => {
+      if (!isMounted) return;
+
+      try {
+        const requests = [];
+        for (const doc of snapshot.docs) {
+          try {
+            const data = doc.data();
+            const fromUserDoc = await getDoc(doc(db, 'users', data.from));
+            if (fromUserDoc.exists()) {
+              requests.push({
+                id: doc.id,
+                ...data,
+                fromUser: fromUserDoc.data()
+              });
             }
-          }));
-          setIncomingRequests(withUserInfo);
-        } catch (err) {
-          console.error('Error processing incoming requests:', err);
-          setError('Error loading incoming requests');
+          } catch (err) {
+            console.error(`Error processing incoming request ${doc.id}:`, err);
+          }
         }
-      },
-      (error) => {
-        if (!isMounted) return;
-        console.error('Incoming requests listener error:', error);
-        setError('Error loading incoming requests');
+        console.log('Loaded incoming friend requests for', currentUser.uid, requests);
+        if (isMounted) {
+          setIncomingRequests(requests);
+        }
+      } catch (err) {
+        console.error('Error processing incoming requests:', err);
+        if (isMounted) {
+          setError('Failed to load incoming requests');
+        }
       }
-    );
+    });
 
     // Subscribe to outgoing requests
     const outgoingQuery = query(
@@ -72,65 +82,79 @@ const FriendRequests = () => {
       where('status', '==', 'pending')
     );
 
-    const outgoingUnsub = onSnapshot(outgoingQuery,
-      async (snapshot) => {
-        if (!isMounted) return;
-        
-        try {
-          const reqs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          const withUserInfo = await Promise.all(reqs.map(async req => {
-            try {
-              const user = await getUserById(req.receiverId);
-              return { ...req, toUser: user };
-            } catch (err) {
-              console.error('Error fetching user info:', err);
-              return { ...req, toUser: null };
+    const outgoingUnsubscribe = onSnapshot(outgoingQuery, async (snapshot) => {
+      if (!isMounted) return;
+
+      try {
+        const requests = [];
+        for (const doc of snapshot.docs) {
+          try {
+            const data = doc.data();
+            const toUserDoc = await getDoc(doc(db, 'users', data.receiverId));
+            if (toUserDoc.exists()) {
+              requests.push({
+                id: doc.id,
+                ...data,
+                toUser: toUserDoc.data()
+              });
             }
-          }));
-          setOutgoingRequests(withUserInfo);
-        } catch (err) {
-          console.error('Error processing outgoing requests:', err);
-          setError('Error loading outgoing requests');
-        } finally {
-          setLoading(false);
+          } catch (err) {
+            console.error(`Error processing outgoing request ${doc.id}:`, err);
+          }
         }
-      },
-      (error) => {
-        if (!isMounted) return;
-        console.error('Outgoing requests listener error:', error);
-        setError('Error loading outgoing requests');
-        setLoading(false);
+        console.log('Loaded outgoing friend requests for', currentUser.uid, requests);
+        if (isMounted) {
+          setOutgoingRequests(requests);
+        }
+      } catch (err) {
+        console.error('Error processing outgoing requests:', err);
+        if (isMounted) {
+          setError('Failed to load outgoing requests');
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
-    );
-    
+    });
+
     return () => {
       isMounted = false;
-      incomingUnsub();
-      outgoingUnsub();
+      incomingUnsubscribe();
+      outgoingUnsubscribe();
     };
   }, [currentUser]);
 
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    // The real-time listeners will handle the refresh
+  }, []);
+
   const handleAccept = async (requestId, fromUser) => {
-    if (loadingId) return;
     setLoadingId(requestId);
-    
     try {
+      if (Platform.OS === 'ios') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+
       const result = await friendRequestService.acceptFriendRequest(requestId, currentUser.uid);
+      
       if (result.success) {
         Toast.show({
           type: 'success',
-          text1: 'Friend request accepted!',
+          text1: 'Friend request accepted',
+          text2: `You are now friends with ${fromUser.displayName}`
         });
-        if (Platform.OS === 'ios') {
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        }
+      } else {
+        throw new Error(result.message);
       }
-    } catch (error) {
-      console.error('Error accepting friend request:', error);
+    } catch (err) {
+      console.error('Error accepting friend request:', err);
       Toast.show({
         type: 'error',
-        text1: 'Failed to accept request',
-        text2: error.message,
+        text1: 'Failed to accept friend request',
+        text2: err.message || 'Please try again later'
       });
     } finally {
       setLoadingId(null);
@@ -138,24 +162,28 @@ const FriendRequests = () => {
   };
 
   const handleReject = async (requestId) => {
-    if (loadingId) return;
     setLoadingId(requestId);
-    
     try {
-      await friendRequestService.rejectFriendRequest(requestId);
-      Toast.show({
-        type: 'success',
-        text1: 'Friend request rejected',
-      });
       if (Platform.OS === 'ios') {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
       }
-    } catch (error) {
-      console.error('Error rejecting friend request:', error);
+
+      const result = await friendRequestService.rejectFriendRequest(requestId, currentUser.uid);
+      
+      if (result.success) {
+        Toast.show({
+          type: 'success',
+          text1: 'Friend request rejected'
+        });
+      } else {
+        throw new Error(result.message);
+      }
+    } catch (err) {
+      console.error('Error rejecting friend request:', err);
       Toast.show({
         type: 'error',
-        text1: 'Failed to reject request',
-        text2: error.message,
+        text1: 'Failed to reject friend request',
+        text2: err.message || 'Please try again later'
       });
     } finally {
       setLoadingId(null);
@@ -163,24 +191,28 @@ const FriendRequests = () => {
   };
 
   const handleCancel = async (requestId) => {
-    if (loadingId) return;
     setLoadingId(requestId);
-    
     try {
-      await friendRequestService.cancelFriendRequest(requestId);
-      Toast.show({
-        type: 'success',
-        text1: 'Friend request cancelled',
-      });
       if (Platform.OS === 'ios') {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
       }
-    } catch (error) {
-      console.error('Error cancelling friend request:', error);
+
+      const result = await friendRequestService.cancelFriendRequest(requestId, currentUser.uid);
+      
+      if (result.success) {
+        Toast.show({
+          type: 'success',
+          text1: 'Friend request cancelled'
+        });
+      } else {
+        throw new Error(result.message);
+      }
+    } catch (err) {
+      console.error('Error cancelling friend request:', err);
       Toast.show({
         type: 'error',
-        text1: 'Failed to cancel request',
-        text2: error.message,
+        text1: 'Failed to cancel friend request',
+        text2: err.message || 'Please try again later'
       });
     } finally {
       setLoadingId(null);
@@ -257,36 +289,38 @@ const FriendRequests = () => {
         <Text style={styles.errorText}>{error}</Text>
       )}
       
-      {incomingRequests.length > 0 && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Incoming Requests</Text>
-          <FlatList
-            data={incomingRequests}
-            renderItem={(item) => renderRequestItem({ ...item, type: 'incoming' })}
-            keyExtractor={item => item.id}
-            style={styles.list}
+      <FlatList
+        data={[
+          ...incomingRequests.map(req => ({ ...req, type: 'incoming' })),
+          ...outgoingRequests.map(req => ({ ...req, type: 'outgoing' }))
+        ]}
+        renderItem={({ item }) => renderRequestItem({ item, type: item.type })}
+        keyExtractor={item => item.id}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={['#667eea']}
+            tintColor="#667eea"
           />
-        </View>
-      )}
-
-      {outgoingRequests.length > 0 && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Outgoing Requests</Text>
-          <FlatList
-            data={outgoingRequests}
-            renderItem={(item) => renderRequestItem({ ...item, type: 'outgoing' })}
-            keyExtractor={item => item.id}
-            style={styles.list}
-          />
-        </View>
-      )}
-
-      {incomingRequests.length === 0 && outgoingRequests.length === 0 && (
-        <View style={styles.emptyContainer}>
-          <Ionicons name="people-outline" size={48} color="#667eea" />
-          <Text style={styles.emptyText}>No friend requests</Text>
-        </View>
-      )}
+        }
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <Ionicons name="people-outline" size={48} color="#667eea" />
+            <Text style={styles.emptyText}>No friend requests</Text>
+          </View>
+        }
+        ListHeaderComponent={
+          <>
+            {incomingRequests.length > 0 && (
+              <Text style={styles.sectionTitle}>Incoming Requests</Text>
+            )}
+            {outgoingRequests.length > 0 && (
+              <Text style={styles.sectionTitle}>Outgoing Requests</Text>
+            )}
+          </>
+        }
+      />
     </View>
   );
 };
@@ -301,18 +335,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  section: {
-    marginBottom: 20,
-  },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
     color: '#333',
     marginHorizontal: 16,
     marginVertical: 8,
-  },
-  list: {
-    flex: 1,
   },
   requestItem: {
     flexDirection: 'row',

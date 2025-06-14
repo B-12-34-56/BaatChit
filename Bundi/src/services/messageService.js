@@ -13,9 +13,10 @@ import {
   serverTimestamp,
   writeBatch,
   limit,
-  setDoc
+  setDoc,
+  deleteDoc
 } from 'firebase/firestore';
-import { db } from '../utils/firebase';
+import { db, auth } from '../utils/firebase';
 
 export const messageService = {
   // Create or get existing conversation between two users
@@ -51,6 +52,10 @@ export const messageService = {
 
   // Send a message
   async sendMessage(conversationId, message, recipientId) {
+    const user = auth.currentUser;
+    if (!user) throw new Error('Not authenticated');
+    const userId = user.uid;
+
     try {
       const batch = writeBatch(db);
       
@@ -58,7 +63,7 @@ export const messageService = {
       const messageRef = doc(collection(db, 'conversations', conversationId, 'messages'));
       batch.set(messageRef, {
         text: message.text,
-        senderUid: message.senderUid,
+        senderUid: userId,
         timestamp: serverTimestamp(),
         createdAt: serverTimestamp(),
         read: false,
@@ -76,13 +81,13 @@ export const messageService = {
       if (!conversationSnap.exists()) {
         // Create the conversation if it doesn't exist
         await setDoc(conversationRef, {
-          participants: [message.senderUid, recipientId],
+          participants: [userId, recipientId],
           createdAt: serverTimestamp(),
           lastMessage: '',
           lastMessageTime: serverTimestamp(),
           lastMessageSender: '',
           unreadCount: {
-            [message.senderUid]: 0,
+            [userId]: 0,
             [recipientId]: 0
           }
         });
@@ -98,16 +103,16 @@ export const messageService = {
       batch.update(conversationRef, {
         lastMessage: message.text,
         lastMessageTime: serverTimestamp(),
-        lastMessageSender: message.senderUid,
+        lastMessageSender: userId,
         [`unreadCount.${otherUserId}`]: currentUnreadCount + 1,
         typing: {
-          [message.senderUid]: false,
+          [userId]: false,
           [otherUserId]: false
         }
       });
       
       // Update userChats for sender
-      const senderUserChatsRef = doc(db, 'userChats', message.senderUid);
+      const senderUserChatsRef = doc(db, 'userChats', userId);
       batch.set(senderUserChatsRef, {
         [conversationId]: {
           userInfo: {
@@ -125,7 +130,7 @@ export const messageService = {
       batch.set(recipientUserChatsRef, {
         [conversationId]: {
           userInfo: {
-            uid: message.senderUid,
+            uid: userId,
             displayName: message.senderDisplayName || 'Unknown',
             photoURL: message.senderPhotoURL || null,
           },
@@ -138,7 +143,7 @@ export const messageService = {
       
       console.log('Message sent:', {
         conversationId,
-        sender: message.senderUid,
+        sender: userId,
         recipient: otherUserId,
         message: message.text
       });
@@ -147,7 +152,7 @@ export const messageService = {
     } catch (error) {
       console.error('Error sending message:', error, {
         conversationId,
-        sender: message.senderUid,
+        sender: userId,
         recipient: recipientId
       });
       return { success: false, error: error.message };
@@ -156,6 +161,9 @@ export const messageService = {
 
   // Get messages for a conversation
   async getMessages(conversationId, limitCount = 50) {
+    const user = auth.currentUser;
+    if (!user) throw new Error('Not authenticated');
+
     try {
       const messagesRef = collection(db, 'conversations', conversationId, 'messages');
       const q = query(
@@ -174,12 +182,15 @@ export const messageService = {
       return messages.reverse();
     } catch (error) {
       console.error('Error getting messages:', error);
-      return [];
+      throw error;
     }
   },
 
   // Mark messages as read
   async markAsRead(conversationId, userId) {
+    const user = auth.currentUser;
+    if (!user) throw new Error('Not authenticated');
+
     try {
       const batch = writeBatch(db);
       
@@ -206,7 +217,7 @@ export const messageService = {
       return { success: true };
     } catch (error) {
       console.error('Error marking messages as read:', error);
-      return { success: false, error: error.message };
+      throw error;
     }
   },
 
@@ -254,8 +265,23 @@ export const messageService = {
 
   // Delete a message (soft delete)
   async deleteMessage(conversationId, messageId) {
+    const user = auth.currentUser;
+    if (!user) throw new Error('Not authenticated');
+    const userId = user.uid;
+
     try {
       const messageRef = doc(db, 'conversations', conversationId, 'messages', messageId);
+      const messageDoc = await getDoc(messageRef);
+
+      if (!messageDoc.exists()) {
+        throw new Error('Message not found');
+      }
+
+      const messageData = messageDoc.data();
+      if (messageData.senderUid !== userId) {
+        throw new Error('Not authorized to delete this message');
+      }
+
       await updateDoc(messageRef, {
         deleted: true,
         deletedAt: serverTimestamp()
@@ -264,7 +290,7 @@ export const messageService = {
       return { success: true };
     } catch (error) {
       console.error('Error deleting message:', error);
-      return { success: false, error: error.message };
+      throw error;
     }
   },
 
@@ -406,6 +432,58 @@ export const messageService = {
       }
       console.error('Error in getRecentImageMessages:', err);
       return [{ error: err.message || 'Unknown error in getRecentImageMessages' }];
+    }
+  },
+
+  // Get unread message count
+  async getUnreadMessageCount(conversationId) {
+    const user = auth.currentUser;
+    if (!user) throw new Error('Not authenticated');
+    const userId = user.uid;
+
+    try {
+      const unreadQuery = query(
+        collection(db, 'conversations', conversationId, 'messages'),
+        where('senderUid', '!=', userId),
+        where('read', '==', false)
+      );
+
+      const unreadSnapshot = await getDocs(unreadQuery);
+      return unreadSnapshot.size;
+    } catch (error) {
+      console.error('[MessageService] Error getting unread message count:', error);
+      throw error;
+    }
+  },
+
+  // Update message status
+  async updateMessageStatus(messageId, status) {
+    const user = auth.currentUser;
+    if (!user) throw new Error('Not authenticated');
+    const userId = user.uid;
+
+    try {
+      const messageRef = doc(db, 'conversations', conversationId, 'messages', messageId);
+      const messageDoc = await getDoc(messageRef);
+
+      if (!messageDoc.exists()) {
+        throw new Error('Message not found');
+      }
+
+      const messageData = messageDoc.data();
+      if (messageData.senderUid !== userId) {
+        throw new Error('Not authorized to update this message');
+      }
+
+      await updateDoc(messageRef, {
+        status,
+        updatedAt: serverTimestamp()
+      });
+
+      return true;
+    } catch (error) {
+      console.error('[MessageService] Error updating message status:', error);
+      throw error;
     }
   },
 };
