@@ -44,6 +44,7 @@ const Sidebar = () => {
         if (!userDoc.exists()) {
           setError('User profile not found');
           setFriends([]);
+          setLoading(false);
           return;
         }
 
@@ -55,13 +56,6 @@ const Sidebar = () => {
           setLoading(false);
           return;
         }
-
-        // Throttle updates to prevent excessive re-renders
-        const now = Date.now();
-        if (now - lastUpdate.current < 1000) {
-          return;
-        }
-        lastUpdate.current = now;
 
         // Create a query to get all friends' documents
         const friendsQuery = query(

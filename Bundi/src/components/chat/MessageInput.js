@@ -20,8 +20,9 @@ import { ChatContext } from '../../context/ChatContext';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth } from '../../utils/firebase';
 import { messageService } from '../../services/messageService';
-import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { getStorage, ref, uploadBytes, getDownloadURL, uploadString } from "firebase/storage";
 import { getFirestore, doc, getDoc, setDoc, updateDoc, serverTimestamp, collection, getDocs, query, where, limit, orderBy } from "firebase/firestore";
+import { getAuth } from 'firebase/auth';
 
 // Get file hash using expo-crypto
 async function getFileHash(uri) {
@@ -527,64 +528,70 @@ async function incrementUploadLog(userId, userName, fileHash, fileName) {
 
 async function uploadImageToFirebase(imageUri, userId, fileHash, imageFile) {
   try {
+    // Verify authentication state
+    const auth = getAuth();
+    if (!auth.currentUser) {
+      throw new Error('User not authenticated');
+    }
+
     console.log('Starting Firebase upload...');
     console.log('Image URI:', imageUri);
     console.log('User ID:', userId);
     console.log('File Hash:', fileHash);
     console.log('Image File:', imageFile);
+    console.log('Auth State:', {
+      isAuthenticated: !!auth.currentUser,
+      uid: auth.currentUser?.uid,
+      phoneNumber: auth.currentUser?.phoneNumber,
+      email: auth.currentUser?.email
+    });
 
     const storage = getStorage();
     
-    // FIX: Use the correct path that matches your storage rules
+    // CRITICAL FIX: Don't use phone number UID in path
+    // Generate a Firebase-compatible ID
     const timestamp = Date.now();
-    const fileName = `${timestamp}_${fileHash.substring(0, 8)}_${imageFile.fileName || 'image.jpg'}`;
-    const path = `user_uploads/${userId}/${fileName}`;
+    const randomId = Math.random().toString(36).substring(2, 15);
+    const safeUserId = `ph_${timestamp}_${randomId}`; // Prefix with 'ph_' for phone users
+    
+    // Use a completely different path structure
+    const fileName = `img_${timestamp}_${fileHash.substring(0, 8)}.jpg`;
+    const path = `media/${safeUserId}/${fileName}`;
     
     console.log('Storage path:', path);
     
     const storageRef = ref(storage, path);
     console.log('Storage reference created');
-
+    
     // Get blob from URI
     console.log('Fetching image blob...');
     const response = await fetch(imageUri);
     console.log('Fetch response status:', response.status);
-    
-    if (!response.ok) {
-      throw new Error(`Failed to fetch image: ${response.status}`);
-    }
-    
     const blob = await response.blob();
-    console.log('Blob created:', {
-      size: blob.size,
-      type: blob.type
-    });
+    console.log('Blob created, size:', blob.size);
 
-    // Validate blob
-    if (!blob || blob.size === 0) {
-      throw new Error('Invalid blob: empty or null');
+    // Verify blob size and type
+    if (blob.size > 5 * 1024 * 1024) {
+      throw new Error('File size exceeds 5MB limit');
     }
-
-    // Set proper metadata
-    const metadata = {
-      contentType: blob.type || 'image/jpeg',
-      customMetadata: {
-        fileHash: fileHash,
-        originalFileName: imageFile.fileName || 'unknown',
-        uploadTimestamp: timestamp.toString(),
-        userId: userId
-      }
-    };
-
-    console.log('Upload metadata:', metadata);
+    if (!blob.type.startsWith('image/')) {
+      throw new Error('File must be an image');
+    }
 
     // Upload blob with metadata
     console.log('Uploading to Firebase...');
+    const metadata = {
+      contentType: blob.type || 'image/jpeg',
+      customMetadata: {
+        originalUserId: userId, // Store the actual phone UID here
+        phoneNumber: auth.currentUser?.phoneNumber || 'unknown',
+        fileHash: fileHash,
+        uploadTime: new Date().toISOString()
+      }
+    };
+
     const snapshot = await uploadBytes(storageRef, blob, metadata);
-    console.log('Upload completed:', {
-      bytesTransferred: snapshot.metadata.size,
-      fullPath: snapshot.metadata.fullPath
-    });
+    console.log('Upload completed, getting download URL...');
     
     const downloadURL = await getDownloadURL(snapshot.ref);
     console.log('Download URL obtained:', downloadURL);
@@ -596,19 +603,64 @@ async function uploadImageToFirebase(imageUri, userId, fileHash, imageFile) {
       message: error.message,
       serverResponse: error.serverResponse,
       stack: error.stack,
-      customData: error.customData
+      auth: {
+        currentUser: auth.currentUser ? {
+          uid: auth.currentUser.uid,
+          phoneNumber: auth.currentUser.phoneNumber,
+          email: auth.currentUser.email,
+          isAnonymous: auth.currentUser.isAnonymous
+        } : null
+      }
     });
     
-    // Provide more specific error messages
+    // More specific error handling
     if (error.code === 'storage/unauthorized') {
-      throw new Error('Unauthorized: Check authentication and storage rules');
-    } else if (error.code === 'storage/canceled') {
-      throw new Error('Upload was canceled');
+      throw new Error('Storage error: You are not authorized to upload files');
     } else if (error.code === 'storage/unknown') {
-      // This often means path doesn't match storage rules
       throw new Error('Storage error: Check if path matches storage rules');
+    } else if (error.code === 'storage/quota-exceeded') {
+      throw new Error('Storage error: Quota exceeded');
+    } else if (error.code === 'storage/invalid-checksum') {
+      throw new Error('Storage error: Invalid file checksum');
     }
     
+    throw error;
+  }
+}
+
+// Alternative upload method using putString
+async function alternativeUpload(imageUri, userId, fileHash, imageFile) {
+  try {
+    const storage = getStorage();
+    
+    // Convert to base64
+    const response = await fetch(imageUri);
+    const blob = await response.blob();
+    
+    const reader = new FileReader();
+    const base64 = await new Promise((resolve, reject) => {
+      reader.onloadend = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+    
+    // Try uploading as base64 string
+    const timestamp = Date.now();
+    const path = `base64uploads/${timestamp}.jpg`;
+    const storageRef = ref(storage, path);
+    
+    console.log('Trying base64 upload to:', path);
+    
+    // Upload using putString
+    const snapshot = await uploadString(storageRef, base64, 'data_url');
+    const downloadURL = await getDownloadURL(snapshot.ref);
+    
+    console.log('Base64 upload successful:', downloadURL);
+    
+    return downloadURL;
+    
+  } catch (error) {
+    console.error('Alternative upload also failed:', error);
     throw error;
   }
 }
@@ -1144,9 +1196,9 @@ const MessageInput = () => {
 
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       style={styles.container}
-      key={forceUpdate ? 'force-update' : 'normal'}
     >
       {/* Add the debug buttons */}
       {__DEV__ && (
@@ -1178,6 +1230,7 @@ const MessageInput = () => {
           placeholder="Type a message"
           style={styles.textInput}
           editable={!uploading}
+          multiline
         />
         
         <TouchableOpacity
@@ -1262,6 +1315,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderTopWidth: 1,
     borderTopColor: '#e0e0e0',
+    paddingBottom: Platform.OS === 'ios' ? 20 : 0,
   },
   permissionText: {
     textAlign: 'center',
@@ -1282,6 +1336,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e0e0e0',
     fontSize: 16,
+    maxHeight: 100,
   },
   attachButton: {
     padding: 8,

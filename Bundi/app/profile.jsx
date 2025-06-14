@@ -26,6 +26,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import authService from '../src/services/authService';
+import { updateUserProfile } from '../src/services/userService';
 import { useAuthState } from 'react-firebase-hooks/auth';
 
 const MAX_NAME_LENGTH = 50;
@@ -122,43 +123,121 @@ export default function Profile() {
 
   const handleAvatarChange = async () => {
     try {
-      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      
-      if (permissionResult.granted === false) {
-        Alert.alert("Permission Required", "Permission to access camera roll is required!");
-        return;
+      Alert.alert(
+        "Change Profile Photo",
+        "Choose how you want to update your profile photo",
+        [
+          {
+            text: "Take Photo",
+            onPress: () => handleImageSelection('camera'),
+          },
+          {
+            text: "Choose from Gallery",
+            onPress: () => handleImageSelection('gallery'),
+          },
+          {
+            text: "Cancel",
+            style: "cancel",
+          },
+        ]
+      );
+    } catch (error) {
+      Alert.alert("Error", "Failed to open image picker");
+    }
+  };
+
+  const handleImageSelection = async (source) => {
+    try {
+      let permissionResult;
+      let result;
+
+      if (source === 'camera') {
+        permissionResult = await ImagePicker.requestCameraPermissionsAsync();
+        if (permissionResult.granted === false) {
+          Alert.alert("Permission Required", "Permission to access camera is required!");
+          return;
+        }
+        result = await ImagePicker.launchCameraAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          allowsEditing: true,
+          aspect: [1, 1],
+          quality: 0.7,
+          maxWidth: 800,
+          maxHeight: 800,
+          base64: true,
+        });
+      } else {
+        permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (permissionResult.granted === false) {
+          Alert.alert("Permission Required", "Permission to access photo library is required!");
+          return;
+        }
+        result = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          allowsEditing: true,
+          aspect: [1, 1],
+          quality: 0.7,
+          maxWidth: 800,
+          maxHeight: 800,
+          base64: true,
+        });
       }
 
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 0.8,
-        maxWidth: 1000,
-        maxHeight: 1000,
-      });
-
       if (!result.canceled && result.assets[0]) {
-        const fileSize = result.assets[0].fileSize;
-        if (fileSize > 5 * 1024 * 1024) { // 5MB limit
+        const asset = result.assets[0];
+        
+        // Check file size
+        if (asset.fileSize > 5 * 1024 * 1024) {
           Alert.alert("Error", "Image size must be less than 5MB");
           return;
         }
-        setAvatarFile(result.assets[0]);
-        setPhotoURL(result.assets[0].uri);
+
+        // Show preview and confirm
+        Alert.alert(
+          "Confirm Photo",
+          "Would you like to use this photo as your profile picture?",
+          [
+            {
+              text: "Cancel",
+              style: "cancel",
+            },
+            {
+              text: "Use Photo",
+              onPress: () => {
+                setAvatarFile(asset);
+                setPhotoURL(asset.uri);
+              },
+            },
+          ]
+        );
       }
     } catch (error) {
-      Alert.alert("Error", "Failed to pick image. Please try again.");
+      console.error('Error selecting image:', error);
+      Alert.alert("Error", "Failed to process image. Please try again.");
     }
   };
 
   const uploadImage = async (uri) => {
     try {
+      setUploadProgress(0);
       const response = await fetch(uri);
       const blob = await response.blob();
       
-      const storageRef = ref(storage, `avatars/${user.uid}_${Date.now()}`);
-      const uploadTask = uploadBytesResumable(storageRef, blob);
+      // Create a unique filename with timestamp and user ID
+      const timestamp = Date.now();
+      const storageRef = ref(storage, `avatars/${user.uid}_${timestamp}`);
+      
+      // Add metadata
+      const metadata = {
+        contentType: blob.type,
+        customMetadata: {
+          userId: user.uid,
+          uploadTime: new Date().toISOString(),
+          phoneNumber: user.phoneNumber || 'unknown'
+        }
+      };
+
+      const uploadTask = uploadBytesResumable(storageRef, blob, metadata);
       
       return new Promise((resolve, reject) => {
         uploadTask.on('state_changed',
@@ -167,16 +246,23 @@ export default function Profile() {
             setUploadProgress(progress);
           },
           (error) => {
-            reject(error);
+            console.error('Upload error:', error);
+            reject(new Error('Failed to upload image. Please try again.'));
           },
           async () => {
-            const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-            resolve(downloadURL);
+            try {
+              const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+              resolve(downloadURL);
+            } catch (error) {
+              console.error('Error getting download URL:', error);
+              reject(new Error('Failed to get image URL. Please try again.'));
+            }
           }
         );
       });
     } catch (error) {
-      throw new Error('Failed to upload image');
+      console.error('Error in uploadImage:', error);
+      throw new Error('Failed to upload image. Please try again.');
     }
   };
 
@@ -203,19 +289,12 @@ export default function Profile() {
       });
       
       // Update Firestore user document
-      await updateDoc(doc(db, "users", user.uid), {
+      await updateUserProfile(user.uid, {
         displayName: profile.name,
         photoURL: newPhotoURL,
         email: profile.email,
         bio: profile.bio,
         updatedAt: new Date(),
-      });
-      
-      // Update local profile
-      await authService.updateUserProfile({
-        name: profile.name,
-        email: profile.email,
-        bio: profile.bio,
       });
       
       Alert.alert("Success", "Profile updated successfully!");
@@ -394,14 +473,6 @@ export default function Profile() {
                   <Text style={styles.buttonText}>Save Changes</Text>
                 )}
               </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.button, styles.signOutButton]}
-                onPress={handleSignOut}
-                disabled={loading}
-              >
-                <Text style={styles.signOutButtonText}>Sign Out</Text>
-              </TouchableOpacity>
             </View>
           </ScrollView>
         </TouchableWithoutFeedback>
@@ -413,26 +484,19 @@ export default function Profile() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
   },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
     flexGrow: 1,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    padding: 20,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E5EA',
+    marginBottom: 20,
   },
   title: {
     fontSize: 24,
@@ -444,15 +508,17 @@ const styles = StyleSheet.create({
   },
   avatarContainer: {
     alignItems: 'center',
-    marginVertical: 20,
+    marginBottom: 30,
   },
   avatar: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    borderWidth: 3,
+    borderColor: '#fff',
   },
   avatarPlaceholder: {
-    backgroundColor: '#E5E5EA',
+    backgroundColor: '#e0e0e0',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -461,9 +527,9 @@ const styles = StyleSheet.create({
     bottom: 0,
     right: 0,
     backgroundColor: '#007AFF',
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 2,
@@ -487,22 +553,26 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: 16,
-    marginBottom: 8,
+    fontWeight: '600',
     color: '#fff',
+    marginBottom: 8,
   },
   input: {
-    borderWidth: 1,
-    borderColor: '#E5E5EA',
+    backgroundColor: 'rgba(255,255,255,0.9)',
     borderRadius: 8,
     padding: 12,
     fontSize: 16,
-    backgroundColor: '#fff',
+    color: '#333',
   },
   bioInput: {
     height: 100,
     textAlignVertical: 'top',
   },
+  disabledInput: {
+    opacity: 0.7,
+  },
   inputError: {
+    borderWidth: 1,
     borderColor: '#FF3B30',
   },
   errorText: {
@@ -511,14 +581,10 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   charCount: {
-    color: '#8E8E93',
+    color: '#fff',
     fontSize: 12,
     textAlign: 'right',
     marginTop: 4,
-  },
-  disabledInput: {
-    backgroundColor: '#F2F2F7',
-    color: '#8E8E93',
   },
   button: {
     backgroundColor: '#007AFF',
@@ -535,13 +601,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
-  signOutButton: {
-    backgroundColor: '#FF3B30',
-    marginTop: 20,
-  },
-  signOutButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 }); 
