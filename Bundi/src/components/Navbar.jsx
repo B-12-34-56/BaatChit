@@ -1,9 +1,47 @@
 // Navbar.jsx - React Native version
 import React from 'react';
-import { View, Text } from 'react-native';
+import { View, Text, TouchableOpacity, Alert } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
+import { signOut } from 'firebase/auth';
+import { auth } from '../utils/firebase';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useRouter } from 'expo-router';
 
 const Navbar = () => {
+  const router = useRouter();
+
+  const handleLogout = () => {
+    Alert.alert(
+      "Sign Out",
+      "Are you sure you want to sign out?",
+      [
+        {
+          text: "Cancel",
+          style: "cancel"
+        },
+        {
+          text: "Sign Out",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await signOut(auth);
+              await AsyncStorage.multiRemove(['authSession', 'phoneNumber', 'verificationId']);
+              router.replace('/phone-login');
+            } catch (error) {
+              console.error('Error signing out:', error);
+              Alert.alert('Error', 'Failed to sign out. Please try again.');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const handleProfile = () => {
+    router.push('/profile');
+  };
+
   return (
     <View style={{
       flexDirection: 'row',
@@ -30,7 +68,26 @@ const Navbar = () => {
           Bundi/Kitab
         </Text>
       </View>
-      <View style={{ flex: 1 }}></View>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+        <TouchableOpacity 
+          onPress={handleProfile}
+          style={{
+            padding: 8,
+            borderRadius: 8,
+          }}
+        >
+          <Ionicons name="person-circle-outline" size={24} color="#667eea" />
+        </TouchableOpacity>
+        <TouchableOpacity 
+          onPress={handleLogout}
+          style={{
+            padding: 8,
+            borderRadius: 8,
+          }}
+        >
+          <Ionicons name="log-out-outline" size={24} color="#e53e3e" />
+        </TouchableOpacity>
+      </View>
     </View>
   );
 };

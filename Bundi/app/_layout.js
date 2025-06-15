@@ -13,7 +13,7 @@ export default function RootLayout() {
   useEffect(() => {
     if (loading) return; // Wait for auth to load
 
-    const inAuthGroup = segments[0] === '(auth)' || segments[0] === 'login';
+    const inAuthGroup = segments[0] === '(auth)' || segments[0] === 'login' || segments[0] === 'register';
 
     if (!user && !inAuthGroup) {
       // User is not signed in and trying to access protected route

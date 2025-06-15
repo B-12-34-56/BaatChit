@@ -22,22 +22,22 @@ export const messageService = {
   async createConversation(user1Id, user2Id) {
     try {
       // Sort IDs to ensure consistent conversation ID
-      const sortedIds = [user1Id, user2Id].sort();
-      const conversationId = `${sortedIds[0]}${sortedIds[1]}`;
+      const [a, b] = [user1Id, user2Id].sort();
+      const conversationId = `${a}_${b}`;
       
       const conversationRef = doc(db, 'conversations', conversationId);
       const conversationSnap = await getDoc(conversationRef);
       
       if (!conversationSnap.exists()) {
         await setDoc(conversationRef, {
-          participants: sortedIds,
+          participants: [a, b],
           createdAt: serverTimestamp(),
           lastMessage: '',
           lastMessageTime: serverTimestamp(),
           lastMessageSender: '',
           unreadCount: {
-            [user1Id]: 0,
-            [user2Id]: 0
+            [a]: 0,
+            [b]: 0
           }
         });
       }

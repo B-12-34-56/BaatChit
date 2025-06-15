@@ -1,12 +1,31 @@
 // FriendRequestsDropdown.js - React Native conversion of FriendRequestsDropdown.jsx
-import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, Modal, FlatList, Image, StyleSheet, Alert } from 'react-native';
+import React, { useEffect, useState, useRef } from 'react';
+import { 
+  View, 
+  Text, 
+  TouchableOpacity, 
+  Modal, 
+  FlatList, 
+  Image, 
+  StyleSheet, 
+  Alert,
+  Animated,
+  Dimensions,
+  Platform,
+  ActivityIndicator
+} from 'react-native';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth } from '../utils/firebase';
 import { db } from '../utils/firebase';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, getDoc, doc } from 'firebase/firestore';
 import { friendRequestService } from '../services/friendRequestService';
 import { getUserById } from '../services/userService';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
+import Toast from 'react-native-toast-message';
+import * as Haptics from 'expo-haptics';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 const FriendRequestsDropdown = () => {
   const [currentUser] = useAuthState(auth);
@@ -15,27 +34,89 @@ const FriendRequestsDropdown = () => {
   const [loadingId, setLoadingId] = useState(null);
   const [acceptedId, setAcceptedId] = useState(null);
   const [newFriend, setNewFriend] = useState(null);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  // Animation values
+  const slideAnim = useRef(new Animated.Value(0)).current;
+  const scaleAnim = useRef(new Animated.Value(0)).current;
+  const badgeAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (!currentUser?.uid) return;
-    
+
     let isMounted = true;
-    
-    const q = query(collection(db, 'friendRequests'), where('receiverId', '==', currentUser.uid), where('status', '==', 'pending'));
+    setLoading(true);
+    setError(null);
+
+    // Query for incoming friend requests
+    const q = query(
+      collection(db, 'friendRequests'),
+      where('to', '==', currentUser.uid),
+      where('status', '==', 'pending')
+    );
+
     const unsub = onSnapshot(q, 
       async (snapshot) => {
         if (!isMounted) return;
         
-        const reqs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        const withUserInfo = await Promise.all(reqs.map(async req => {
-          const user = await getUserById(req.from);
-          return { ...req, fromUser: user };
-        }));
-        setRequests(withUserInfo);
+        try {
+          const reqs = [];
+          for (const doc of snapshot.docs) {
+            try {
+              const data = doc.data();
+              const fromUser = await getDoc(doc(db, 'users', data.from));
+              if (fromUser.exists()) {
+                reqs.push({
+                  id: doc.id,
+                  ...data,
+                  fromUser: fromUser.data()
+                });
+              }
+            } catch (err) {
+              console.error('Error fetching user info:', err);
+            }
+          }
+          
+          setRequests(reqs);
+          setError(null);
+
+          // Animate badge for new requests
+          if (reqs.length > requests.length) {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            Animated.sequence([
+              Animated.timing(badgeAnim, {
+                toValue: 1,
+                duration: 200,
+                useNativeDriver: true,
+              }),
+              Animated.timing(badgeAnim, {
+                toValue: 0,
+                duration: 200,
+                useNativeDriver: true,
+              }),
+            ]).start();
+          }
+        } catch (err) {
+          console.error('Error processing friend requests:', err);
+          setError('Error loading friend requests');
+          Toast.show({
+            type: 'error',
+            text1: 'Error loading friend requests',
+          });
+        } finally {
+          setLoading(false);
+        }
       },
       (error) => {
         if (!isMounted) return;
         console.error('FriendRequestsDropdown listener error:', error);
+        setError('Error loading friend requests');
+        Toast.show({
+          type: 'error',
+          text1: 'Error loading friend requests',
+        });
+        setLoading(false);
       }
     );
     
@@ -45,156 +126,254 @@ const FriendRequestsDropdown = () => {
     };
   }, [currentUser]);
 
+  const openModal = () => {
+    setModalOpen(true);
+    Animated.parallel([
+      Animated.timing(slideAnim, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+      Animated.spring(scaleAnim, {
+        toValue: 1,
+        friction: 8,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  };
+
+  const closeModal = () => {
+    Animated.parallel([
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+      Animated.timing(scaleAnim, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setModalOpen(false);
+    });
+  };
+
   const handleAccept = async (id) => {
     setLoadingId(id);
-    const result = await friendRequestService.acceptFriendRequest(id, currentUser.uid);
-    if (!result.success) {
-      Alert.alert('Error', result.message || 'Failed to accept request');
-      setLoadingId(null);
-      return;
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      const result = await friendRequestService.acceptFriendRequest(id, currentUser.uid);
+      if (!result.success) {
+        Toast.show({
+          type: 'error',
+          text1: 'Error: ' + (result.message || 'Failed to accept request'),
+        });
+        setLoadingId(null);
+        return;
+      }
+      setAcceptedId(id);
+      Toast.show({
+        type: 'success',
+        text1: 'Friend request accepted!',
+      });
+      
+      // Remove the request from local state immediately
+      setRequests(prevRequests => prevRequests.filter(req => req.id !== id));
+      
+      setTimeout(() => setAcceptedId(null), 1200);
+    } catch (err) {
+      Toast.show({
+        type: 'error',
+        text1: 'Error accepting request: ' + err.message,
+      });
     }
-    setAcceptedId(id);
-    Alert.alert('Success', 'Friend request accepted!');
-    setNewFriend(result.friend);
-    setTimeout(() => setAcceptedId(null), 1200);
     setLoadingId(null);
   };
-
+  
   const handleReject = async (id) => {
     setLoadingId(id);
-    await friendRequestService.rejectFriendRequest(id, currentUser.uid);
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      const result = await friendRequestService.rejectFriendRequest(id, currentUser.uid);
+      if (!result.success) {
+        Toast.show({
+          type: 'error',
+          text1: 'Error: ' + (result.message || 'Failed to reject request'),
+        });
+        setLoadingId(null);
+        return;
+      }
+      Toast.show({
+        type: 'info',
+        text1: 'Friend request rejected.',
+      });
+      
+      // Remove the request from local state immediately
+      setRequests(prevRequests => prevRequests.filter(req => req.id !== id));
+    } catch (err) {
+      Toast.show({
+        type: 'error',
+        text1: 'Error rejecting request: ' + err.message,
+      });
+    }
     setLoadingId(null);
   };
 
-  const renderRequest = ({ item }) => (
-    <View style={styles.requestItem}>
-      <View style={styles.requestInfo}>
-        <Image 
-          source={{ 
-            uri: item.fromUser?.photoURL || 'https://ui-avatars.com/api/?name=' + (item.fromUser?.displayName || 'User') 
-          }} 
-          style={styles.avatar}
-        />
-        <View>
-          <Text style={styles.displayName}>{item.fromUser?.displayName || item.from}</Text>
-          <Text style={styles.email}>{item.fromUser?.email}</Text>
+  const renderRequest = ({ item }) => {
+    const { id, fromUser } = item;
+    const isAccepted = acceptedId === id;
+    const isLoading = loadingId === id;
+
+    return (
+      <Animated.View
+        style={[
+          styles.requestItem,
+          {
+            transform: [
+              { scale: scaleAnim },
+              { translateX: slideAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [SCREEN_WIDTH, 0]
+              })}
+            ]
+          }
+        ]}
+      >
+        <View style={styles.requestContent}>
+          <Image
+            source={{ 
+              uri: fromUser?.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(fromUser?.displayName || 'User')}&background=667eea&color=fff&bold=true`
+            }}
+            style={styles.avatar}
+          />
+          <View style={styles.requestInfo}>
+            <Text style={styles.requestName}>
+              {fromUser?.displayName || 'Unknown User'}
+            </Text>
+            <Text style={styles.requestText}>
+              wants to be your friend
+            </Text>
+          </View>
         </View>
-      </View>
-      <View style={styles.requestActions}>
-        {acceptedId === item.id ? (
-          <View style={styles.acceptedContainer}>
-            <Text style={styles.acceptedText}>✓ Accepted!</Text>
-          </View>
-        ) : (
-          <View style={styles.actionButtons}>
-            <TouchableOpacity 
-              style={[styles.actionButton, styles.acceptButton]}
-              onPress={() => handleAccept(item.id)} 
-              disabled={loadingId === item.id}
-            >
-              <Text style={styles.actionButtonText}>
-                {loadingId === item.id ? 'Accepting...' : 'Accept'}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity 
-              style={[styles.actionButton, styles.rejectButton]}
-              onPress={() => handleReject(item.id)} 
-              disabled={loadingId === item.id}
-            >
-              <Text style={styles.actionButtonText}>
-                {loadingId === item.id ? 'Rejecting...' : 'Reject'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        )}
-      </View>
-    </View>
-  );
+
+        <View style={styles.actions}>
+          {isAccepted ? (
+            <View style={styles.acceptedBadge}>
+              <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />
+            </View>
+          ) : (
+            <>
+              <TouchableOpacity
+                style={[styles.actionButton, styles.acceptButton]}
+                onPress={() => handleAccept(id)}
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Ionicons name="checkmark" size={24} color="#fff" />
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.actionButton, styles.rejectButton]}
+                onPress={() => handleReject(id)}
+                disabled={isLoading}
+              >
+                <Ionicons name="close" size={24} color="#fff" />
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
+      </Animated.View>
+    );
+  };
 
   return (
     <View style={styles.container}>
-      <TouchableOpacity onPress={() => setModalOpen(true)} style={styles.bellButton}>
-        <Text style={styles.bellIcon}>🔔</Text>
+      <TouchableOpacity
+        onPress={openModal}
+        style={styles.button}
+        disabled={loading}
+      >
+        <Ionicons name="people" size={20} color="#667eea" />
+        <Text style={styles.buttonText}>Friend Requests</Text>
         {requests.length > 0 && (
-          <View style={styles.badge}>
+          <Animated.View
+            style={[
+              styles.badge,
+              {
+                transform: [
+                  {
+                    scale: badgeAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [1, 1.2]
+                    })
+                  }
+                ]
+              }
+            ]}
+          >
             <Text style={styles.badgeText}>{requests.length}</Text>
-          </View>
+          </Animated.View>
         )}
       </TouchableOpacity>
 
-      {/* Main Modal */}
       <Modal
         visible={modalOpen}
         transparent
-        animationType="slide"
-        onRequestClose={() => setModalOpen(false)}
+        animationType="none"
+        onRequestClose={closeModal}
       >
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.modalOverlay}
-          onPress={() => setModalOpen(false)}
+          activeOpacity={1}
+          onPress={closeModal}
         >
-          <View style={styles.modal}>
+          <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Friend Requests</Text>
-              <TouchableOpacity onPress={() => setModalOpen(false)}>
-                <Text style={styles.closeButton}>×</Text>
+              <TouchableOpacity onPress={closeModal}>
+                <Ionicons name="close" size={24} color="#666" />
               </TouchableOpacity>
             </View>
-            {requests.length === 0 ? (
-              <Text style={styles.noRequests}>No pending requests</Text>
+
+            {loading ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color="#667eea" />
+                <Text style={styles.loadingText}>Loading requests...</Text>
+              </View>
+            ) : error ? (
+              <View style={styles.errorContainer}>
+                <Ionicons name="alert-circle" size={24} color="#ff3b30" />
+                <Text style={styles.errorText}>{error}</Text>
+                <TouchableOpacity
+                  style={styles.retryButton}
+                  onPress={() => {
+                    setError(null);
+                    setLoading(true);
+                  }}
+                >
+                  <Text style={styles.retryButtonText}>Retry</Text>
+                </TouchableOpacity>
+              </View>
+            ) : requests.length === 0 ? (
+              <View style={styles.emptyContainer}>
+                <Ionicons name="people-outline" size={48} color="#ccc" />
+                <Text style={styles.emptyText}>No pending friend requests</Text>
+              </View>
             ) : (
               <FlatList
                 data={requests}
                 renderItem={renderRequest}
                 keyExtractor={(item) => item.id}
                 style={styles.requestsList}
+                showsVerticalScrollIndicator={false}
               />
             )}
           </View>
         </TouchableOpacity>
       </Modal>
-
-      {/* New Friend Modal */}
-      {newFriend && (
-        <Modal
-          visible={!!newFriend}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setNewFriend(null)}
-        >
-          <TouchableOpacity 
-            style={styles.modalOverlay}
-            onPress={() => setNewFriend(null)}
-          >
-            <View style={styles.modal}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>You are now friends!</Text>
-                <TouchableOpacity onPress={() => setNewFriend(null)}>
-                  <Text style={styles.closeButton}>×</Text>
-                </TouchableOpacity>
-              </View>
-              <View style={styles.newFriendInfo}>
-                <Image 
-                  source={{ 
-                    uri: newFriend.photoURL || 'https://ui-avatars.com/api/?name=' + (newFriend.displayName || 'User') 
-                  }} 
-                  style={styles.newFriendAvatar}
-                />
-                <View>
-                  <Text style={styles.newFriendName}>{newFriend.displayName || newFriend.uid}</Text>
-                  <Text style={styles.newFriendEmail}>{newFriend.email}</Text>
-                </View>
-              </View>
-              <TouchableOpacity 
-                style={styles.closeModalButton}
-                onPress={() => setNewFriend(null)}
-              >
-                <Text style={styles.closeModalButtonText}>Close</Text>
-              </TouchableOpacity>
-            </View>
-          </TouchableOpacity>
-        </Modal>
-      )}
     </View>
   );
 };
@@ -203,168 +382,152 @@ const styles = StyleSheet.create({
   container: {
     position: 'relative',
   },
-  bellButton: {
+  button: {
+    padding: 8,
     position: 'relative',
   },
-  bellIcon: {
-    fontSize: 24,
+  buttonText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#667eea',
   },
   badge: {
     position: 'absolute',
-    top: -4,
-    right: -4,
-    backgroundColor: '#e53e3e',
+    top: 0,
+    right: 0,
+    backgroundColor: '#FF3B30',
     borderRadius: 10,
     minWidth: 20,
     height: 20,
     justifyContent: 'center',
     alignItems: 'center',
+    paddingHorizontal: 4,
   },
   badgeText: {
-    color: 'white',
+    color: '#fff',
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: 'bold',
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(44,62,80,0.18)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
   },
-  modal: {
-    backgroundColor: 'white',
-    borderRadius: 18,
-    padding: 32,
-    minWidth: 340,
-    maxWidth: '90%',
+  modalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: Platform.OS === 'ios' ? 40 : 20,
     maxHeight: '80%',
-    shadowColor: '#2c3e50',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.18,
-    shadowRadius: 24,
-    elevation: 8,
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 18,
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
   },
   modalTitle: {
-    fontWeight: '700',
     fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
   },
-  closeButton: {
-    fontSize: 22,
-    color: '#888',
+  loadingContainer: {
+    padding: 40,
+    alignItems: 'center',
+  },
+  loadingText: {
+    color: '#667eea',
+    fontSize: 16,
+    marginTop: 12,
+    textAlign: 'center',
+  },
+  errorContainer: {
+    padding: 40,
+    alignItems: 'center',
+  },
+  errorText: {
+    color: '#FF3B30',
+    fontSize: 16,
+    marginTop: 12,
+    textAlign: 'center',
+  },
+  retryButton: {
+    padding: 12,
+    backgroundColor: '#667eea',
+    borderRadius: 8,
+    marginTop: 20,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 16,
     fontWeight: 'bold',
   },
-  noRequests: {
-    color: '#888',
-    fontWeight: '500',
+  emptyContainer: {
+    padding: 40,
+    alignItems: 'center',
+  },
+  emptyText: {
+    color: '#667eea',
+    fontSize: 16,
+    marginTop: 12,
   },
   requestsList: {
-    maxHeight: 300,
+    maxHeight: 400,
   },
   requestItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 8,
   },
-  requestInfo: {
+  requestContent: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    flex: 1,
   },
   avatar: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    shadowColor: '#2c3e50',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.10,
-    shadowRadius: 4,
-    elevation: 2,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    marginRight: 12,
   },
-  displayName: {
-    fontWeight: '600',
+  requestInfo: {
+    flex: 1,
+  },
+  requestName: {
     fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 2,
   },
-  email: {
-    fontSize: 13,
-    color: '#888',
+  requestText: {
+    fontSize: 14,
+    color: '#666',
   },
-  requestActions: {
-    alignItems: 'center',
-  },
-  acceptedContainer: {
-    alignItems: 'center',
-  },
-  acceptedText: {
-    color: '#4CAF50',
-    fontWeight: '700',
-    fontSize: 15,
-  },
-  actionButtons: {
+  actions: {
     flexDirection: 'row',
-    gap: 6,
+    alignItems: 'center',
   },
   actionButton: {
-    borderRadius: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
   },
   acceptButton: {
     backgroundColor: '#4CAF50',
   },
   rejectButton: {
-    backgroundColor: '#e53e3e',
+    backgroundColor: '#FF3B30',
   },
-  actionButtonText: {
-    color: 'white',
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  newFriendInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-    marginBottom: 18,
-  },
-  newFriendAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    shadowColor: '#2c3e50',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.10,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  newFriendName: {
-    fontWeight: '600',
-    fontSize: 18,
-  },
-  newFriendEmail: {
-    fontSize: 14,
-    color: '#888',
-  },
-  closeModalButton: {
-    backgroundColor: '#667eea',
-    borderRadius: 8,
-    paddingHorizontal: 24,
-    paddingVertical: 10,
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  closeModalButtonText: {
-    color: 'white',
-    fontWeight: '700',
-    fontSize: 16,
+  acceptedBadge: {
+    padding: 8,
   },
 });
 
