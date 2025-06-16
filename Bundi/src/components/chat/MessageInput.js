@@ -22,6 +22,7 @@ import { auth } from '../../utils/firebase';
 import { messageService } from '../../services/messageService';
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { getFirestore, doc, getDoc, setDoc, updateDoc, serverTimestamp, collection, getDocs, query, where, limit, orderBy, deleteDoc } from "firebase/firestore";
+import Ionicons from '@expo/vector-icons/Ionicons';
 
 // Add timing utility
 const getTimestamp = () => {
@@ -1431,392 +1432,75 @@ const MessageInput = () => {
     );
   };
 
-  // Add the test function
-  const testDuplicateSystem = async () => {
-    try {
-      console.log('=== TESTING DUPLICATE DETECTION SYSTEM ===');
-      const db = getFirestore();
-      
-      // Test each collection
-      const collections = {
-        'global_upload_logs': await getDocs(query(collection(db, 'global_upload_logs'), limit(3))),
-        'perceptual_hashes': await getDocs(query(collection(db, 'perceptual_hashes'), limit(3))),
-        'similarity_groups': await getDocs(query(collection(db, 'similarity_groups'), limit(3))),
-        'group_counts': await getDocs(query(collection(db, 'group_counts'), limit(3))),
-      };
-      
-      // Log results
-      Object.entries(collections).forEach(([name, snapshot]) => {
-        console.log(`${name}: ${snapshot.size} documents`);
-        if (snapshot.size > 0) {
-          snapshot.forEach((doc, i) => {
-            if (i < 1) console.log(`  Sample: ${doc.id}`, Object.keys(doc.data()));
-          });
-        }
-      });
-      
-      // Assessment
-      const uploadCount = collections['global_upload_logs'].size;
-      const hashCount = collections['perceptual_hashes'].size;
-      const groupCount = collections['similarity_groups'].size;
-      
-      console.log('\n=== ASSESSMENT ===');
-      if (uploadCount === 0) {
-        console.log('❌ No upload logs - users not uploading or tracking broken');
-      } else {
-        console.log('✅ Upload tracking working');
-      }
-      
-      if (hashCount === 0) {
-        console.log('❌ No perceptual hashes - Cloud Function not working');
-      } else {
-        console.log('✅ Cloud Function processing images');
-      }
-      
-      if (groupCount === 0) {
-        console.log('❌ No similarity groups - Cross-device detection not working');
-      } else {
-        console.log('✅ Cross-device detection working');
-      }
-
-      // Check for recent activity
-      console.log('\n=== CHECKING RECENT ACTIVITY ===');
-      
-      // Check for recent perceptual hashes (last 10 minutes)
-      const recentHashes = await getDocs(
-        query(
-          collection(db, 'perceptual_hashes'), 
-          orderBy('processedAt', 'desc'), 
-          limit(5)
-        )
-      );
-      
-      console.log(`🔍 Recent perceptual hashes: ${recentHashes.size}`);
-      recentHashes.forEach((doc, i) => {
-        const data = doc.data();
-        const processedTime = data.processedAt?.toDate?.();
-        console.log(`  ${i+1}. Processed: ${processedTime} Hash: ${doc.id.substring(0, 12)}...`);
-      });
-      
-      // Check if your recent upload got processed
-      const specificHash = "9cec292ec0abdc101f8c123f357927236f0aedcc77ae920f2d3673800fae5c05";
-      const hashDoc = await getDoc(doc(db, 'perceptual_hashes', specificHash));
-      
-      console.log(`\n🧪 YOUR RECENT UPLOAD (${specificHash.substring(0, 12)}...):`);
-      if (hashDoc.exists()) {
-        const data = hashDoc.data();
-        console.log(`  Has perceptual hash: ${!!data.perceptualHash}`);
-        console.log(`  Processed at: ${data.processedAt?.toDate?.()}`);
-      } else {
-        console.log('  ❌ Not found in perceptual_hashes - Cloud Function not processing!');
-      }
-      
-      Alert.alert('Debug Complete', 
-        `Upload logs: ${uploadCount}\nPerceptual hashes: ${hashCount}\nSimilarity groups: ${groupCount}\n\nCheck Metro console for details`
-      );
-
-      // Run cross-device detection test
-      await testCrossDeviceDetection();
-      
-    } catch (error) {
-      console.error('Debug error:', error);
-      Alert.alert('Debug Error', error.message);
-    }
-  };
-
-  const testCrossDeviceDetection = async () => {
-    try {
-      console.log('\n=== TESTING CROSS-DEVICE DETECTION ===');
-      const db = getFirestore();
-      
-      // Get all similarity groups to see if images are grouped
-      const allGroups = await getDocs(collection(db, 'similarity_groups'));
-      console.log(`📊 Total similarity groups: ${allGroups.size}`);
-      
-      allGroups.forEach((doc, i) => {
-        const data = doc.data();
-        console.log(`  Group ${i+1}: Hash ${doc.id.substring(0, 12)}... → Group ID: ${data.groupId}`);
-      });
-      
-      // Check group counts to see how many images per group
-      const allGroupCounts = await getDocs(collection(db, 'group_counts'));
-      console.log(`\n📈 Group count details: ${allGroupCounts.size} groups`);
-      
-      allGroupCounts.forEach((doc, i) => {
-        const data = doc.data();
-        console.log(`  Group ${i+1}: ${doc.id} → ${data.totalCount} total uploads, ${data.memberCount} unique images`);
-        console.log(`    Members: ${data.memberHashes?.map(h => h.substring(0, 8)).join(', ')}`);
-      });
-      
-      // Test your specific hash
-      const yourHash = "9cec292ec0abdc101f8c123f357927236f0aedcc77ae920f2d3673800fae5c05";
-      const yourGroup = await getDoc(doc(db, 'similarity_groups', yourHash));
-      
-      if (yourGroup.exists()) {
-        const groupId = yourGroup.data().groupId;
-        console.log(`\n🎯 YOUR IMAGE: In group ${groupId}`);
-        
-        const groupCount = await getDoc(doc(db, 'group_counts', groupId));
-        if (groupCount.exists()) {
-          const data = groupCount.data();
-          console.log(`  Group has ${data.totalCount} total uploads from ${data.memberCount} unique images`);
-          console.log(`  Should block: ${data.totalCount >= 2 ? 'YES' : 'NO'}`);
-        }
-      } else {
-        console.log(`\n🎯 YOUR IMAGE: Not in any similarity group (only exact matches work)`);
-      }
-      
-    } catch (error) {
-      console.error('Cross-device test error:', error);
-      Alert.alert('Cross-Device Test Error', error.message);
-    }
-  };
-
-  // Simplified checkImageDuplicate function
-  const checkImageDuplicate = async (uri, file) => {
-    try {
-      setUploading(true);
-      setDuplicateWarning('🔄 Checking for similar images...');
-      const fileHash = await getFileHash(uri);
-      
-      const duplicateCheck = await checkDuplicateAcrossDevices(fileHash);
-      
-      if (duplicateCheck.totalCount >= 1) {
-        setDuplicateModalData({
-          totalCount: duplicateCheck.totalCount,
-          isExact: duplicateCheck.isExact,
-          detectionMethod: duplicateCheck.detectionMethod,
-          allUploads: duplicateCheck.allUploads || [],
-          fileHash: fileHash,
-          canProceed: duplicateCheck.totalCount === 1
-        });
-        setShowDuplicateModal(true);
-        
-        if (duplicateCheck.totalCount >= 2) {
-          setDuplicateWarning('⛔ Maximum uploads reached (2/3). This image cannot be uploaded again.');
-        } else {
-          setDuplicateWarning(`⚠️ Duplicate detected (${duplicateCheck.totalCount}/3). One more upload allowed.`);
-        }
-      } else {
-        setDuplicateWarning('✅ New image ready to upload');
-      }
-    } catch (error) {
-      console.error('Error checking duplicate:', error);
-      setDuplicateWarning('❌ Error checking duplicate. Please try again.');
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  // Add cleanup function
-  const cleanupTestData = async () => {
-    try {
-      console.log('🧹 Starting cleanup of test data...');
-      const db = getFirestore();
-      
-      // Get all upload logs
-      const uploadLogs = await getDocs(collection(db, 'global_upload_logs'));
-      console.log(`Found ${uploadLogs.size} upload logs`);
-      
-      // Reset counts for test images
-      const testImagePrefixes = ['IMG_8550', 'IMG_8551', 'IMG_8554'];
-      let resetCount = 0;
-      let deletedCount = 0;
-      
-      for (const doc of uploadLogs.docs) {
-        const data = doc.data();
-        const fileName = data.fileName || '';
-        
-        // Check if this is a test image
-        if (testImagePrefixes.some(prefix => fileName.includes(prefix))) {
-          console.log(`Found test image: ${fileName} (count: ${data.count})`);
-          
-          // Option 1: Delete completely (recommended for clean testing)
-          await deleteDoc(doc.ref);
-          deletedCount++;
-          
-          // Option 2: Reset to 0 (if you want to keep the records)
-          // await updateDoc(doc.ref, {
-          //   count: 0,
-          //   uploads: []
-          // });
-          // resetCount++;
-        }
-      }
-      
-      // Clear ALL similarity groups (since they reference the deleted logs)
-      const similarityGroups = await getDocs(collection(db, 'similarity_groups'));
-      let groupsCleared = 0;
-      
-      for (const doc of similarityGroups.docs) {
-        await deleteDoc(doc.ref);
-        groupsCleared++;
-      }
-      
-      // Clear ALL group counts
-      const groupCounts = await getDocs(collection(db, 'group_counts'));
-      let countsCleared = 0;
-      
-      for (const doc of groupCounts.docs) {
-        await deleteDoc(doc.ref);
-        countsCleared++;
-      }
-      
-      // Clear perceptual hashes for test images
-      const perceptualHashes = await getDocs(collection(db, 'perceptual_hashes'));
-      let hashesCleared = 0;
-      
-      for (const doc of perceptualHashes.docs) {
-        const data = doc.data();
-        const filePath = data.filePath || '';
-        
-        // Check if this is a test image hash
-        if (testImagePrefixes.some(prefix => filePath.includes(prefix))) {
-          await deleteDoc(doc.ref);
-          hashesCleared++;
-        }
-      }
-      
-      console.log(`✅ Cleanup complete!`);
-      console.log(`- Deleted ${deletedCount} upload logs`);
-      console.log(`- Cleared ${groupsCleared} similarity groups`);
-      console.log(`- Cleared ${countsCleared} group counts`);
-      console.log(`- Cleared ${hashesCleared} perceptual hashes`);
-      
-      Alert.alert(
-        'Cleanup Complete', 
-        `Deleted ${deletedCount} test uploads\nCleared ${groupsCleared} groups\nCleared ${hashesCleared} hashes\n\nYou can now test with fresh data!`
-      );
-      
-    } catch (error) {
-      console.error('❌ Cleanup error:', error);
-      Alert.alert('Cleanup Error', error.message);
-    }
-  };
-
   if (!hasPermission) {
     return <Text style={styles.permissionText}>No access to camera roll</Text>;
   }
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={styles.container}
-    >
-      {__DEV__ && (
-        <View style={{flexDirection: 'row', justifyContent: 'space-around', padding: 10}}>
-          <TouchableOpacity 
-            onPress={testDuplicateSystem}
-            style={{backgroundColor: '#ff6b6b', padding: 10, borderRadius: 5, flex: 1, marginRight: 5}}
-          >
-            <Text style={{color: 'white', textAlign: 'center', fontWeight: 'bold'}}>
-              🔧 Test System
-            </Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            onPress={showBlobErrors}
-            style={{backgroundColor: '#e74c3c', padding: 10, borderRadius: 5, flex: 1, marginLeft: 2, marginRight: 2}}
-          >
-            <Text style={{color: 'white', textAlign: 'center', fontWeight: 'bold', fontSize: 12}}>
-              🚨 Errors ({blobErrors.length})
-            </Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            onPress={testCrossDeviceDetection}
-            style={{backgroundColor: '#4a90e2', padding: 10, borderRadius: 5, flex: 1, marginLeft: 2, marginRight: 2}}
-          >
-            <Text style={{color: 'white', textAlign: 'center', fontWeight: 'bold'}}>
-              🔄 Cross-Device
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity 
-            onPress={cleanupTestData}
-            style={{backgroundColor: '#e67e22', padding: 10, borderRadius: 5, flex: 1, marginLeft: 5}}
-          >
-            <Text style={{color: 'white', textAlign: 'center', fontWeight: 'bold', fontSize: 12}}>
-              🧹 Clean
-            </Text>
-          </TouchableOpacity>
-        </View>
-      )}
-      
+    <View style={styles.container}>
       <View style={styles.inputContainer}>
         <TextInput
+          style={styles.input}
           value={text}
           onChangeText={setText}
-          placeholder="Type a message"
-          style={styles.textInput}
-          editable={!uploading}
+          placeholder="Type a message..."
+          placeholderTextColor="#999"
+          multiline
         />
         
-        <TouchableOpacity
+        <TouchableOpacity 
+          style={styles.attachButton} 
           onPress={handleImagePick}
-          style={styles.attachButton}
           disabled={uploading}
         >
-          <Text style={styles.attachIcon}>📎</Text>
+          <Ionicons name="attach" size={24} color="#007AFF" />
         </TouchableOpacity>
         
         <TouchableOpacity
-          onPress={handleSend}
           style={[
             styles.sendButton,
             uploading && styles.disabledButton,
             duplicateModalData?.totalCount >= 3 && imageUri && styles.blockedButton
           ]}
           disabled={Boolean(uploading) || Boolean(!text.trim() && !imageUri)}
+          onPress={handleSend}
         >
-          {uploading ? (
-            <ActivityIndicator size="small" color="#fff" />
-          ) : (
-            <Text style={styles.sendButtonText}>Send</Text>
-          )}
+          <Ionicons name="send" size={24} color="#007AFF" />
         </TouchableOpacity>
       </View>
-      
-      {duplicateWarning ? (
-        <View style={styles.warningContainer}>
-          <Text style={[
-            styles.warningText,
-            duplicateWarning.includes('⛔') && styles.blockedWarning,
-            duplicateWarning.includes('⚠️') && styles.duplicateWarning,
-            duplicateWarning.includes('✅') && styles.originalWarning
-          ]}>
-            {duplicateWarning}
-          </Text>
-        </View>
-      ) : null}
-      
+
       {imageUri && (
-        <View style={styles.imagePreview}>
-          <Image source={{ uri: imageUri }} style={styles.previewImage} />
+        <View style={styles.imagePreviewContainer}>
+          <Image source={{ uri: imageUri }} style={styles.imagePreview} />
           <View style={styles.imageInfo}>
             <Text style={styles.imageFileName}>
               {imageFile?.fileName || 'image.jpg'}
             </Text>
             {duplicateModalData && (
-              <Text style={[
-                styles.uploadCount,
-                duplicateModalData.totalCount >= 3 && styles.uploadCountBlocked
-              ]}>
-                {duplicateModalData.totalCount}/3 uploads
-              </Text>
+              <View style={styles.uploadCountContainer}>
+                <Text style={[
+                  styles.uploadCount,
+                  duplicateModalData.totalCount >= 3 && styles.uploadCountBlocked
+                ]}>
+                  {duplicateModalData.totalCount}/3 uploads
+                </Text>
+              </View>
             )}
           </View>
-          <TouchableOpacity
-            onPress={removeImage}
-            style={styles.removeButton}
-          >
-            <Text style={styles.removeButtonText}>×</Text>
+          <TouchableOpacity style={styles.removeImageButton} onPress={removeImage}>
+            <Ionicons name="close-circle" size={24} color="#FF3B30" />
           </TouchableOpacity>
         </View>
       )}
-      
+
+      {duplicateWarning ? (
+        <View style={styles.warningContainer}>
+          <Text style={styles.warningText}>{duplicateWarning}</Text>
+        </View>
+      ) : null}
+
       {renderDuplicateModal()}
-    </KeyboardAvoidingView>
+    </View>
   );
 };
 
@@ -1837,7 +1521,7 @@ const styles = StyleSheet.create({
     padding: 12,
     alignItems: 'center',
   },
-  textInput: {
+  input: {
     flex: 1,
     padding: 10,
     paddingHorizontal: 16,
@@ -1848,10 +1532,6 @@ const styles = StyleSheet.create({
   },
   attachButton: {
     padding: 8,
-  },
-  attachIcon: {
-    fontSize: 26,
-    opacity: 0.8,
   },
   sendButton: {
     padding: 10,
@@ -1865,35 +1545,16 @@ const styles = StyleSheet.create({
   blockedButton: {
     backgroundColor: '#e53e3e',
   },
-  sendButtonText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 16,
-  },
-  warningContainer: {
-    paddingHorizontal: 12,
-    paddingBottom: 8,
-  },
-  warningText: {
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  duplicateWarning: {
-    color: '#ff9800',
-  },
-  blockedWarning: {
-    color: '#e53e3e',
-  },
-  originalWarning: {
-    color: '#4caf50',
-  },
-  imagePreview: {
+  imagePreviewContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     margin: 12,
     marginTop: 0,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 8,
+    padding: 8,
   },
-  previewImage: {
+  imagePreview: {
     width: 60,
     height: 60,
     borderRadius: 8,
@@ -1901,10 +1562,19 @@ const styles = StyleSheet.create({
   imageInfo: {
     flex: 1,
     marginLeft: 12,
+    marginRight: 8,
   },
   imageFileName: {
     color: '#444',
     fontWeight: '500',
+    fontSize: 14,
+    marginBottom: 4,
+  },
+  removeImageButton: {
+    padding: 8,
+  },
+  uploadCountContainer: {
+    marginTop: 4,
   },
   uploadCount: {
     color: '#ff9800',
@@ -1915,13 +1585,13 @@ const styles = StyleSheet.create({
   uploadCountBlocked: {
     color: '#e53e3e',
   },
-  removeButton: {
-    padding: 8,
+  warningContainer: {
+    paddingHorizontal: 12,
+    paddingBottom: 8,
   },
-  removeButtonText: {
-    fontSize: 24,
-    color: '#e53e3e',
-    fontWeight: 'bold',
+  warningText: {
+    fontWeight: '600',
+    fontSize: 14,
   },
   
   // Modal styles
