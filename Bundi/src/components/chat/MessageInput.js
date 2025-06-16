@@ -23,6 +23,25 @@ import { messageService } from '../../services/messageService';
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { getFirestore, doc, getDoc, setDoc, updateDoc, serverTimestamp, collection, getDocs, query, where, limit, orderBy } from "firebase/firestore";
 
+// Add timing utility
+const getTimestamp = () => {
+  const now = new Date();
+  return {
+    iso: now.toISOString(),
+    unix: now.getTime(),
+    readable: now.toLocaleTimeString()
+  };
+};
+
+// Enhanced logging utility
+const logDuplicateEvent = (event, data) => {
+  const timestamp = getTimestamp();
+  console.log(`[${timestamp.readable}] 🔍 ${event}:`, {
+    ...data,
+    timestamp: timestamp.iso
+  });
+};
+
 // Get file hash using expo-crypto
 async function getFileHash(uri) {
   try {
@@ -96,7 +115,13 @@ async function getUploadLog(fileHash) {
 
 // Get total count including similar images - ENHANCED VERSION
 async function getTotalUploadCount(fileHash) {
+  const startTime = getTimestamp();
+  
   try {
+    logDuplicateEvent('TOTAL_COUNT_START', {
+      fileHash: fileHash.substring(0, 12) + '...'
+    });
+    
     const db = getFirestore();
     
     // First, check if this hash belongs to a similarity group
@@ -104,6 +129,11 @@ async function getTotalUploadCount(fileHash) {
     const groupSnap = await getDoc(groupRef);
     
     if (!groupSnap.exists()) {
+      logDuplicateEvent('TOTAL_COUNT_NO_GROUP', {
+        fileHash: fileHash.substring(0, 12) + '...',
+        timeElapsedMs: Date.now() - startTime.unix
+      });
+      
       // No group, check just this hash
       const uploadLog = await getUploadLog(fileHash);
       return {
@@ -114,6 +144,10 @@ async function getTotalUploadCount(fileHash) {
     }
     
     const groupId = groupSnap.data().groupId;
+    logDuplicateEvent('TOTAL_COUNT_GROUP_FOUND', {
+      groupId,
+      timeElapsedMs: Date.now() - startTime.unix
+    });
     
     // Get cached group count for performance
     const groupCountRef = doc(db, "group_counts", groupId);
@@ -150,12 +184,24 @@ async function getTotalUploadCount(fileHash) {
       // Sort by timestamp
       allUploads.sort((a, b) => a.timestamp - b.timestamp);
       
+      logDuplicateEvent('TOTAL_COUNT_CACHED', {
+        groupId,
+        totalCount: countData.totalCount || 0,
+        memberCount: groupMembers.size,
+        timeElapsedMs: Date.now() - startTime.unix
+      });
+      
       return {
         totalCount: countData.totalCount || 0,
         allUploads,
         relatedHashes
       };
     }
+    
+    logDuplicateEvent('TOTAL_COUNT_CALCULATING', {
+      groupId,
+      timeElapsedMs: Date.now() - startTime.unix
+    });
     
     // Fallback: calculate manually if cache doesn't exist
     const groupMembersQuery = query(
@@ -185,7 +231,12 @@ async function getTotalUploadCount(fileHash) {
     
     allUploads.sort((a, b) => a.timestamp - b.timestamp);
     
-    console.log(`Total count for ${fileHash}: ${totalCount} across ${relatedHashes.length} related images`);
+    logDuplicateEvent('TOTAL_COUNT_CALCULATED', {
+      groupId,
+      totalCount,
+      memberCount: groupMembers.size,
+      timeElapsedMs: Date.now() - startTime.unix
+    });
     
     return {
       totalCount,
@@ -193,7 +244,12 @@ async function getTotalUploadCount(fileHash) {
       relatedHashes
     };
   } catch (error) {
-    console.error('Error getting total upload count:', error);
+    logDuplicateEvent('TOTAL_COUNT_ERROR', {
+      error: error.message,
+      stack: error.stack,
+      timeElapsedMs: Date.now() - startTime.unix
+    });
+    
     return { totalCount: 0, allUploads: [], relatedHashes: [fileHash] };
   }
 }
@@ -221,81 +277,268 @@ function logError(operation, error, context = {}) {
   return errorInfo;
 }
 
-// Enhanced duplicate checking with error logging
+// Update checkSimilarityGroupWithRetry with enhanced logging
+async function checkSimilarityGroupWithRetry(fileHash, maxRetries = 3, initialDelay = 1000) {
+  let retryCount = 0;
+  let delay = initialDelay;
+  const startTime = getTimestamp();
+  
+  logDuplicateEvent('SIMILARITY_CHECK_START', {
+    fileHash: fileHash.substring(0, 12) + '...',
+    maxRetries,
+    initialDelay
+  });
+  
+  while (retryCount < maxRetries) {
+    try {
+      logDuplicateEvent('SIMILARITY_CHECK_ATTEMPT', {
+        attempt: retryCount + 1,
+        maxRetries,
+        delay,
+        elapsedMs: Date.now() - startTime.unix
+      });
+      
+      const db = getFirestore();
+      const groupRef = doc(db, "similarity_groups", fileHash);
+      const groupSnap = await getDoc(groupRef);
+      
+      if (groupSnap.exists()) {
+        const groupData = groupSnap.data();
+        if (!groupData || !groupData.groupId) {
+          throw new Error('Invalid group data');
+        }
+        
+        // Check if the group was recently created
+        const groupTimestamp = groupData.updatedAt?.toDate?.() || new Date();
+        const timeSinceUpdate = Date.now() - groupTimestamp.getTime();
+        
+        logDuplicateEvent('SIMILARITY_GROUP_FOUND', {
+          groupId: groupData.groupId,
+          timeSinceUpdate,
+          groupCreatedAt: groupTimestamp.toISOString(),
+          attempt: retryCount + 1
+        });
+        
+        if (timeSinceUpdate < 30000) { // 30 seconds
+          logDuplicateEvent('SIMILARITY_GROUP_RECENT', {
+            groupId: groupData.groupId,
+            timeSinceUpdate,
+            waitingFor: delay
+          });
+          await new Promise(resolve => setTimeout(resolve, delay));
+          retryCount++;
+          delay *= 2;
+          continue;
+        }
+        
+        return {
+          success: true,
+          groupId: groupData.groupId,
+          timestamp: groupTimestamp,
+          attempt: retryCount + 1,
+          timeSinceUpdate
+        };
+      }
+      
+      // Check processing status
+      const processingRef = doc(db, "processing_status", fileHash);
+      const processingSnap = await getDoc(processingRef);
+      
+      if (processingSnap.exists() && processingSnap.data()?.status === 'pending') {
+        const processingData = processingSnap.data();
+        logDuplicateEvent('PROCESSING_PENDING', {
+          status: processingData.status,
+          startedAt: processingData.startedAt?.toDate?.()?.toISOString(),
+          attempt: retryCount + 1
+        });
+        
+        await new Promise(resolve => setTimeout(resolve, delay));
+        retryCount++;
+        delay *= 2;
+        continue;
+      }
+      
+      logDuplicateEvent('NO_SIMILARITY_GROUP', {
+        attempt: retryCount + 1,
+        hasProcessingStatus: processingSnap.exists(),
+        processingStatus: processingSnap.exists() ? processingSnap.data()?.status : 'none'
+      });
+      
+      return {
+        success: false,
+        attempt: retryCount + 1,
+        reason: 'no_group_found'
+      };
+      
+    } catch (error) {
+      logDuplicateEvent('SIMILARITY_CHECK_ERROR', {
+        error: error.message,
+        attempt: retryCount + 1,
+        stack: error.stack
+      });
+      
+      if (retryCount < maxRetries - 1) {
+        logDuplicateEvent('SIMILARITY_CHECK_RETRY', {
+          nextAttempt: retryCount + 2,
+          delay
+        });
+        await new Promise(resolve => setTimeout(resolve, delay));
+        retryCount++;
+        delay *= 2;
+      } else {
+        return {
+          success: false,
+          attempt: retryCount + 1,
+          error: error.message,
+          reason: 'max_retries_exceeded'
+        };
+      }
+    }
+  }
+  
+  logDuplicateEvent('SIMILARITY_CHECK_TIMEOUT', {
+    maxRetries,
+    totalTimeMs: Date.now() - startTime.unix
+  });
+  
+  return {
+    success: false,
+    attempt: retryCount,
+    reason: 'max_retries_exceeded'
+  };
+}
+
+// Modify the similarity group check in checkDuplicateAcrossDevices
 async function checkDuplicateAcrossDevices(fileHash, retryCount = 0) {
+  if (!fileHash || typeof fileHash !== 'string') {
+    console.error('❌ Invalid fileHash provided to checkDuplicateAcrossDevices:', fileHash);
+    return {
+      isDuplicate: false,
+      isExact: false,
+      totalCount: 0,
+      detectionMethod: 'invalid_input',
+      relatedHashes: [],
+      error: 'Invalid file hash provided'
+    };
+  }
+
   const db = getFirestore();
   const maxRetries = 3;
   
   try {
     const startTime = performance.now();
+    console.log('🔍 Starting duplicate check for hash:', fileHash.substring(0, 12) + '...');
     
     // STEP 1: Quick exact hash check (same device re-upload)
-    const exactMatchRef = doc(db, "global_upload_logs", fileHash);
-    const exactMatchSnap = await getDoc(exactMatchRef);
-    
-    if (exactMatchSnap.exists()) {
-      const exactData = exactMatchSnap.data();
-      console.log('Found exact hash match (same device re-upload)');
+    try {
+      const exactMatchRef = doc(db, "global_upload_logs", fileHash);
+      const exactMatchSnap = await getDoc(exactMatchRef);
       
-      // Log performance
-      const duration = performance.now() - startTime;
-      console.log(`Exact hash check completed in ${duration.toFixed(2)}ms`);
-      
-      return {
-        isDuplicate: true,
-        isExact: true,
-        totalCount: exactData.count || 0,
-        detectionMethod: 'exact_hash',
-        firstUploaderName: exactData.firstUploaderName,
-        allUploads: exactData.uploads || [],
-        relatedHashes: [fileHash],
-        performanceMs: duration
-      };
-    }
-    
-    // STEP 2: Check if this hash belongs to a similarity group (cross-device)
-    const groupRef = doc(db, "similarity_groups", fileHash);
-    const groupSnap = await getDoc(groupRef);
-    
-    if (groupSnap.exists()) {
-      const groupId = groupSnap.data().groupId;
-      console.log('Found similarity group:', groupId);
-      
-      // Get cached group count for performance
-      const groupCountRef = doc(db, "group_counts", groupId);
-      const groupCountSnap = await getDoc(groupCountRef);
-      
-      if (groupCountSnap.exists()) {
-        const countData = groupCountSnap.data();
+      if (exactMatchSnap.exists()) {
+        const exactData = exactMatchSnap.data();
+        if (!exactData) {
+          console.warn('⚠️ Document exists but data is null:', fileHash);
+          throw new Error('Document data is null');
+        }
         
-        // Get all members of the group
-        const groupMembersQuery = query(
-          collection(db, "similarity_groups"),
-          where("groupId", "==", groupId)
-        );
-        const groupMembers = await getDocs(groupMembersQuery);
-        const relatedHashes = groupMembers.docs.map(doc => doc.id);
+        console.log('✅ Found exact hash match (same device re-upload)');
         
+        // Log performance
         const duration = performance.now() - startTime;
-        console.log(`Cross-device detection: ${countData.totalCount} uploads across ${relatedHashes.length} similar images (${duration.toFixed(2)}ms)`);
+        console.log(`⏱️ Exact hash check completed in ${duration.toFixed(2)}ms`);
         
         return {
-          isDuplicate: countData.totalCount > 0,
-          isExact: false,
-          totalCount: countData.totalCount,
-          detectionMethod: 'similarity_group',
-          relatedHashes: relatedHashes,
-          groupId: groupId,
+          isDuplicate: true,
+          isExact: true,
+          totalCount: exactData.count || 0,
+          detectionMethod: 'exact_hash',
+          firstUploaderName: exactData.firstUploaderName || 'Unknown',
+          allUploads: exactData.uploads || [],
+          relatedHashes: [fileHash],
           performanceMs: duration
         };
       }
+    } catch (exactCheckError) {
+      console.error('❌ Error in exact hash check:', exactCheckError);
+      // Continue to similarity check instead of failing
+    }
+    
+    // STEP 2: Check if this hash belongs to a similarity group (cross-device)
+    try {
+      const similarityResult = await checkSimilarityGroupWithRetry(fileHash);
+      
+      if (similarityResult.success) {
+        const groupId = similarityResult.groupId;
+        console.log(`✅ Found similarity group after ${similarityResult.attempt} attempts:`, groupId);
+        
+        // Get cached group count for performance
+        const groupCountRef = doc(db, "group_counts", groupId);
+        const groupCountSnap = await getDoc(groupCountRef);
+        
+        if (groupCountSnap.exists()) {
+          const countData = groupCountSnap.data();
+          if (!countData) {
+            console.warn('⚠️ Group count exists but data is null:', groupId);
+            throw new Error('Group count data is null');
+          }
+          
+          // Get all members of the group
+          const groupMembersQuery = query(
+            collection(db, "similarity_groups"),
+            where("groupId", "==", groupId)
+          );
+          const groupMembers = await getDocs(groupMembersQuery);
+          
+          if (groupMembers.empty) {
+            console.warn('⚠️ No members found in group:', groupId);
+            throw new Error('No group members found');
+          }
+          
+          const relatedHashes = groupMembers.docs
+            .map(doc => doc.id)
+            .filter(Boolean);
+          
+          const duration = performance.now() - startTime;
+          console.log(`⏱️ Cross-device detection: ${countData.totalCount || 0} uploads across ${relatedHashes.length} similar images (${duration.toFixed(2)}ms)`);
+          
+          return {
+            isDuplicate: (countData.totalCount || 0) > 0,
+            isExact: false,
+            totalCount: countData.totalCount || 0,
+            detectionMethod: 'similarity_group',
+            relatedHashes: relatedHashes,
+            groupId: groupId,
+            performanceMs: duration,
+            allUploads: countData.uploads || [],
+            processingAttempts: similarityResult.attempt
+          };
+        }
+      } else {
+        console.log(`ℹ️ No similarity group found after ${similarityResult.attempt} attempts: ${similarityResult.reason}`);
+      }
+    } catch (similarityCheckError) {
+      console.error('❌ Error in similarity group check:', similarityCheckError);
+      // Continue to manual check instead of failing
     }
     
     // STEP 3: Fallback - manual perceptual hash comparison
-    console.log('Performing manual perceptual hash comparison...');
-    const result = await performManualSimilarityCheck(fileHash);
-    result.performanceMs = performance.now() - startTime;
-    return result;
+    console.log('🔄 Performing manual perceptual hash comparison...');
+    try {
+      const result = await performManualSimilarityCheck(fileHash);
+      if (!result) {
+        throw new Error('Manual check returned null result');
+      }
+      
+      result.performanceMs = performance.now() - startTime;
+      return {
+        ...result,
+        detectionMethod: 'manual_check',
+        relatedHashes: result.relatedHashes || [fileHash]
+      };
+    } catch (manualCheckError) {
+      console.error('❌ Error in manual similarity check:', manualCheckError);
+      throw manualCheckError; // Let this error propagate for retry logic
+    }
     
   } catch (error) {
     const errorInfo = logError('checkDuplicateAcrossDevices', error, {
@@ -312,7 +555,7 @@ async function checkDuplicateAcrossDevices(fileHash, retryCount = 0) {
       error.message.includes('network') ||
       error.message.includes('timeout')
     )) {
-      console.log(`Retrying duplicate check... (${retryCount + 1}/${maxRetries})`);
+      console.log(`🔄 Retrying duplicate check... (${retryCount + 1}/${maxRetries})`);
       await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1))); // Exponential backoff
       return checkDuplicateAcrossDevices(fileHash, retryCount + 1);
     }
@@ -324,7 +567,8 @@ async function checkDuplicateAcrossDevices(fileHash, retryCount = 0) {
       totalCount: 0,
       detectionMethod: 'error_fallback',
       relatedHashes: [fileHash],
-      error: errorInfo
+      error: errorInfo,
+      errorMessage: error.message
     };
   }
 }
@@ -373,7 +617,88 @@ async function performManualSimilarityCheck(fileHash) {
   }
 }
 
-// Enhanced upload process with comprehensive error logging
+// Update checkAndHandleDuplicates with enhanced logging
+async function checkAndHandleDuplicates(fileHash, currentUser) {
+  const startTime = getTimestamp();
+  
+  try {
+    logDuplicateEvent('DUPLICATE_CHECK_START', {
+      fileHash: fileHash.substring(0, 12) + '...',
+      userId: currentUser?.uid
+    });
+    
+    // Get total count including similar images
+    const totalCount = await getTotalUploadCount(fileHash);
+    
+    // Define blocking conditions
+    const isBlocked = totalCount.totalCount >= 2;
+    const isWarning = totalCount.totalCount === 1;
+    
+    logDuplicateEvent('DUPLICATE_CHECK_RESULT', {
+      isBlocked,
+      isWarning,
+      totalCount: totalCount.totalCount,
+      relatedImages: totalCount.relatedHashes.length,
+      timeElapsedMs: Date.now() - startTime.unix
+    });
+    
+    // Prepare response object
+    const response = {
+      isBlocked,
+      isWarning,
+      totalCount: totalCount.totalCount,
+      allUploads: totalCount.allUploads || [],
+      relatedHashes: totalCount.relatedHashes || [fileHash],
+      warningMessage: '',
+      blockedMessage: '',
+      firstUploaderName: totalCount.allUploads?.[0]?.userName || 'Unknown',
+      checkTimestamp: startTime.iso
+    };
+    
+    // Set appropriate messages
+    if (isBlocked) {
+      response.blockedMessage = `Upload blocked: This image (or similar versions) has been uploaded ${totalCount.totalCount} times. Maximum allowed: 2 per unique image.`;
+      response.warningMessage = response.blockedMessage;
+      logDuplicateEvent('DUPLICATE_BLOCKED', {
+        totalCount: totalCount.totalCount,
+        relatedImages: totalCount.relatedHashes.length
+      });
+    } else if (isWarning) {
+      response.warningMessage = `⚠️ WARNING: This image has been uploaded once before. You have one more upload allowed.`;
+      logDuplicateEvent('DUPLICATE_WARNING', {
+        totalCount: totalCount.totalCount
+      });
+    } else {
+      response.warningMessage = '✅ New image ready to upload';
+      logDuplicateEvent('DUPLICATE_NONE', {
+        totalCount: totalCount.totalCount
+      });
+    }
+    
+    return response;
+    
+  } catch (error) {
+    logDuplicateEvent('DUPLICATE_CHECK_ERROR', {
+      error: error.message,
+      stack: error.stack,
+      timeElapsedMs: Date.now() - startTime.unix
+    });
+    
+    return {
+      isBlocked: false,
+      isWarning: false,
+      totalCount: 0,
+      allUploads: [],
+      relatedHashes: [fileHash],
+      warningMessage: '❌ Error checking duplicates. Please try again.',
+      blockedMessage: 'Error checking duplicates. Please try again.',
+      error: error.message,
+      checkTimestamp: startTime.iso
+    };
+  }
+}
+
+// Update handleCrossDeviceUpload to use consolidated logic
 async function handleCrossDeviceUpload(imageUri, imageFile, currentUser) {
   const uploadStartTime = performance.now();
   
@@ -385,30 +710,33 @@ async function handleCrossDeviceUpload(imageUri, imageFile, currentUser) {
     const hashDuration = performance.now() - hashStartTime;
     console.log(`File hash generated in ${hashDuration.toFixed(2)}ms:`, fileHash);
     
-    // Step 2: Check INITIAL count before upload
-    console.log('Checking if this image (or similar) has been uploaded...');
-    let totalCount = await getTotalUploadCount(fileHash);
-
-    // Step 3: Block if already at limit (2 uploads)
-    if (totalCount.totalCount >= 2) {
+    // Step 2: Check duplicates using consolidated logic
+    console.log('Checking for duplicates...');
+    const duplicateCheck = await checkAndHandleDuplicates(fileHash, currentUser);
+    
+    if (duplicateCheck.isBlocked) {
       return {
         imageUrl: null,
         imageHash: fileHash,
         imageTag: 'blocked',
-        warningMessage: `Upload blocked: This image (or similar versions) has been uploaded ${totalCount.totalCount} times. Maximum allowed: 2 per unique image.`,
-        duplicateInfo: totalCount,
+        warningMessage: duplicateCheck.blockedMessage,
+        duplicateInfo: {
+          totalCount: duplicateCheck.totalCount,
+          allUploads: duplicateCheck.allUploads,
+          relatedHashes: duplicateCheck.relatedHashes
+        },
         blocked: true
       };
     }
     
-    // Step 4: Upload to storage
+    // Step 3: Upload to storage
     console.log('Uploading to Firebase Storage...');
     const uploadStorageStartTime = performance.now();
     const imageUrl = await uploadImageToFirebase(imageUri, currentUser.uid, fileHash, imageFile);
     const uploadStorageDuration = performance.now() - uploadStorageStartTime;
     console.log(`Storage upload completed in ${uploadStorageDuration.toFixed(2)}ms`);
     
-    // Step 5: Update upload log
+    // Step 4: Update upload log
     console.log('Updating global upload log...');
     const logUpdateStartTime = performance.now();
     await incrementUploadLog(
@@ -420,12 +748,12 @@ async function handleCrossDeviceUpload(imageUri, imageFile, currentUser) {
     const logUpdateDuration = performance.now() - logUpdateStartTime;
     console.log(`Upload log updated in ${logUpdateDuration.toFixed(2)}ms`);
     
-    // Step 6: Wait for Cloud Function to process similarity
+    // Step 5: Wait for Cloud Function to process similarity
     console.log('⏳ Waiting for similarity processing...');
     await waitForSimilarityProcessing(fileHash);
     
-    // Step 7: Get FINAL count after Cloud Function processing
-    const finalCount = await getTotalUploadCount(fileHash);
+    // Step 6: Get final duplicate check
+    const finalCheck = await checkAndHandleDuplicates(fileHash, currentUser);
     const totalDuration = performance.now() - uploadStartTime;
     
     // Log comprehensive performance metrics
@@ -434,34 +762,19 @@ async function handleCrossDeviceUpload(imageUri, imageFile, currentUser) {
       hashGeneration: `${hashDuration.toFixed(2)}ms`,
       storageUpload: `${uploadStorageDuration.toFixed(2)}ms`,
       logUpdate: `${logUpdateDuration.toFixed(2)}ms`,
-      finalCount: finalCount
+      finalCount: finalCheck.totalCount
     });
-    
-    // Determine warning message and tag
-    let imageTag = 'original';
-    let warningMessage = 'New image uploaded successfully! [ORIGINAL]';
-    
-    if (finalCount.totalCount >= 2) {
-      imageTag = 'duplicate';
-      warningMessage = `⚠️ FINAL UPLOAD WARNING: This was the LAST allowed upload for this image (${finalCount.totalCount}/2). No more uploads permitted.`;
-      
-      // Show alert for 2nd upload
-      Alert.alert(
-        '⚠️ Final Upload - Limit Reached',
-        'This image has now been uploaded the maximum number of times (2). Any future upload attempts will be blocked.',
-        [{ text: 'I Understand', style: 'default' }]
-      );
-    } else if (finalCount.totalCount === 1) {
-      imageTag = 'original';
-      warningMessage = 'New image uploaded successfully! [ORIGINAL]';
-    }
     
     return {
       imageUrl,
       imageHash: fileHash,
-      imageTag,
-      warningMessage,
-      duplicateInfo: finalCount,
+      imageTag: finalCheck.isBlocked ? 'duplicate' : 'original',
+      warningMessage: finalCheck.warningMessage,
+      duplicateInfo: {
+        totalCount: finalCheck.totalCount,
+        allUploads: finalCheck.allUploads,
+        relatedHashes: finalCheck.relatedHashes
+      },
       performance: {
         totalDuration,
         hashDuration,
@@ -609,27 +922,49 @@ async function uploadImageToFirebase(imageUri, userId, fileHash, imageFile) {
 // Add this function BEFORE the MessageInput component
 async function waitForSimilarityProcessing(fileHash, maxChecks = 3, checkInterval = 3000) {
   const db = getFirestore();
+  const startTime = getTimestamp();
   
-  console.log(`⏳ Waiting for similarity processing (up to ${maxChecks} checks, ${checkInterval/1000}s each)...`);
+  logDuplicateEvent('SIMILARITY_PROCESSING_START', {
+    fileHash: fileHash.substring(0, 12) + '...',
+    maxChecks,
+    checkInterval
+  });
   
   for (let i = 0; i < maxChecks; i++) {
-    console.log(`Check ${i + 1}/${maxChecks}...`);
+    logDuplicateEvent('SIMILARITY_PROCESSING_CHECK', {
+      attempt: i + 1,
+      maxChecks,
+      elapsedMs: Date.now() - startTime.unix
+    });
     
     // Check if similarity group exists
     const groupDoc = await getDoc(doc(db, "similarity_groups", fileHash));
     
     if (groupDoc.exists()) {
-      console.log(`✅ Similarity group found after ${i + 1} checks!`);
+      const groupData = groupDoc.data();
+      logDuplicateEvent('SIMILARITY_PROCESSING_COMPLETE', {
+        groupId: groupData.groupId,
+        attempts: i + 1,
+        totalTimeMs: Date.now() - startTime.unix
+      });
       return true;
     }
     
     // Wait before next check (except on last iteration)
     if (i < maxChecks - 1) {
+      logDuplicateEvent('SIMILARITY_PROCESSING_WAIT', {
+        nextAttempt: i + 2,
+        waitTime: checkInterval
+      });
       await new Promise(resolve => setTimeout(resolve, checkInterval));
     }
   }
   
-  console.log('⏱️ Similarity processing timeout - proceeding with available data');
+  logDuplicateEvent('SIMILARITY_PROCESSING_TIMEOUT', {
+    maxChecks,
+    totalTimeMs: Date.now() - startTime.unix
+  });
+  
   return false;
 }
 
@@ -641,10 +976,58 @@ const MessageInput = () => {
   const [imageFile, setImageFile] = useState(null);
   const [duplicateWarning, setDuplicateWarning] = useState('');
   const [uploading, setUploading] = useState(false);
-  const [hasPermission, setHasPermission] = useState(false);
+  const [hasPermission, setHasPermission] = useState(null);
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
   const [duplicateModalData, setDuplicateModalData] = useState(null);
+  const [blobErrors, setBlobErrors] = useState([]);
   const mounted = useRef(true);
+
+  // Add error catching useEffect
+  useEffect(() => {
+    const originalConsoleError = console.error;
+    const originalConsoleWarn = console.warn;
+    
+    console.error = (...args) => {
+      const errorString = args.join(' ');
+      if (errorString.includes('RCTBlobManager') || errorString.includes('attempt to insert nil object')) {
+        console.log('🚨 [MessageInput] RCTBlobManager error captured:', {
+          timestamp: new Date().toISOString(),
+          args: args,
+          currentImageUri: imageUri ? imageUri.substring(0, 50) + '...' : 'none',
+          currentImageFile: imageFile ? {
+            fileName: imageFile.fileName,
+            type: imageFile.type,
+            size: imageFile.fileSize
+          } : 'none',
+          uploading: uploading
+        });
+        
+        setBlobErrors(prev => [...prev, {
+          timestamp: Date.now(),
+          error: errorString,
+          context: {
+            hasImageUri: !!imageUri,
+            hasImageFile: !!imageFile,
+            uploading: uploading
+          }
+        }]);
+      }
+      originalConsoleError.apply(console, args);
+    };
+    
+    console.warn = (...args) => {
+      const warnString = args.join(' ');
+      if (warnString.includes('RCTBlobManager')) {
+        console.log('⚠️ [MessageInput] RCTBlobManager warning captured:', args);
+      }
+      originalConsoleWarn.apply(console, args);
+    };
+    
+    return () => {
+      console.error = originalConsoleError;
+      console.warn = originalConsoleWarn;
+    };
+  }, [imageUri, imageFile, uploading]);
 
   useEffect(() => {
     (async () => {
@@ -658,49 +1041,97 @@ const MessageInput = () => {
   }, []);
 
   const handleImagePick = async () => {
+    console.log('📷 [handleImagePick] Starting image picker...');
+    
     if (!hasPermission) {
+      console.error('❌ [handleImagePick] No permission');
       Alert.alert('Permission Required', 'Permission to access gallery is required!');
       return;
     }
 
     try {
+      console.log('🔍 [handleImagePick] Launching image library...');
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: false,
         quality: 1,
       });
 
+      console.log('📋 [handleImagePick] Picker result:', {
+        canceled: result.canceled,
+        assetsLength: result.assets?.length,
+        firstAsset: result.assets?.[0] ? {
+          uri: result.assets[0].uri?.substring(0, 50) + '...',
+          type: result.assets[0].type,
+          mimeType: result.assets[0].mimeType,
+          fileName: result.assets[0].fileName,
+          fileSize: result.assets[0].fileSize,
+          width: result.assets[0].width,
+          height: result.assets[0].height
+        } : null
+      });
+
       if (!result.canceled && result.assets && result.assets[0]) {
         const asset = result.assets[0];
+        
+        // Validate the asset
+        if (!asset.uri) {
+          throw new Error('Asset URI is null');
+        }
+        
+        if (asset.fileSize && asset.fileSize > 50 * 1024 * 1024) {
+          throw new Error(`File too large: ${(asset.fileSize / (1024 * 1024)).toFixed(2)}MB`);
+        }
+        
+        console.log('✅ [handleImagePick] Asset validated, setting state...');
+        
         if (mounted.current) {
           setImageUri(asset.uri);
           setImageFile(asset);
           setDuplicateWarning('');
+          
+          // Immediately test the URI
+          console.log('🧪 [handleImagePick] Testing URI accessibility...');
+          try {
+            const testResponse = await fetch(asset.uri);
+            console.log('✅ [handleImagePick] URI is accessible:', {
+              status: testResponse.status,
+              contentType: testResponse.headers.get('content-type'),
+              contentLength: testResponse.headers.get('content-length')
+            });
+          } catch (testError) {
+            console.error('❌ [handleImagePick] URI test failed:', testError);
+            Alert.alert('Error', 'Selected image cannot be accessed');
+            return;
+          }
         }
       }
     } catch (error) {
-      console.error('Error picking image:', error);
-      Alert.alert('Error', 'Failed to pick image');
+      console.error('❌ [handleImagePick] Error:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name
+      });
+      Alert.alert('Error', `Failed to pick image: ${error.message}`);
     }
+  };
+
+  const showBlobErrors = () => {
+    if (blobErrors.length === 0) {
+      Alert.alert('No Errors', 'No RCTBlobManager errors captured yet');
+      return;
+    }
+    
+    const errorSummary = blobErrors.map((err, i) => 
+      `${i + 1}. ${new Date(err.timestamp).toLocaleTimeString()}: ${err.error.substring(0, 100)}...`
+    ).join('\n\n');
+    
+    Alert.alert('Captured Blob Errors', errorSummary);
+    console.log('🚨 [showBlobErrors] All captured errors:', blobErrors);
   };
 
   const handleSend = async () => {
     if ((!text.trim() && !imageUri) || !data.chatId || uploading) return;
-    
-    // Check if image is blocked
-    if (duplicateModalData && duplicateModalData.totalCount >= 2) {  // Changed from >= 3
-      Alert.alert(
-        'Upload Blocked',
-        `This image has already been uploaded ${duplicateModalData.totalCount} times. Maximum allowed is 2.`,
-        [{ text: 'OK', onPress: () => {
-          setImageUri(null);
-          setImageFile(null);
-          setDuplicateModalData(null);
-          setDuplicateWarning('');
-        }}]
-      );
-      return;
-    }
     
     let imageHash = null;
     let imageUrl = null;
@@ -719,21 +1150,17 @@ const MessageInput = () => {
           return;
         }
 
-        console.log('📝 About to track upload in database...');
-        // Use enhanced upload handler
-        const uploadResult = await handleCrossDeviceUpload(imageUri, imageFile, currentUser);
-        console.log('✅ Upload tracking completed');
+        // Generate file hash first
+        const fileHash = await getFileHash(imageUri);
         
-        imageUrl = uploadResult.imageUrl;
-        imageHash = uploadResult.imageHash;
-        imageTag = uploadResult.imageTag;
-        warningMessage = uploadResult.warningMessage;
+        // Check duplicates using consolidated logic
+        const duplicateCheck = await checkAndHandleDuplicates(fileHash, currentUser);
         
-        if (uploadResult.blocked) {
+        if (duplicateCheck.isBlocked) {
           console.log('⛔ Upload blocked due to duplicate limit');
           Alert.alert(
             'Upload Blocked',
-            warningMessage,
+            duplicateCheck.blockedMessage,
             [{
               text: 'OK',
               onPress: () => {
@@ -749,6 +1176,21 @@ const MessageInput = () => {
           }
           return;
         }
+        
+        // Set warning if needed
+        if (duplicateCheck.isWarning) {
+          setDuplicateWarning(duplicateCheck.warningMessage);
+        }
+
+        console.log('📝 About to track upload in database...');
+        // Use enhanced upload handler
+        const uploadResult = await handleCrossDeviceUpload(imageUri, imageFile, currentUser);
+        console.log('✅ Upload tracking completed');
+        
+        imageUrl = uploadResult.imageUrl;
+        imageHash = uploadResult.imageHash;
+        imageTag = uploadResult.imageTag;
+        warningMessage = uploadResult.warningMessage;
         
       } catch (err) {
         console.error('❌ Upload error:', err);
@@ -1127,10 +1569,9 @@ const MessageInput = () => {
 
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={styles.container}
     >
-      {/* Add the debug buttons */}
       {__DEV__ && (
         <View style={{flexDirection: 'row', justifyContent: 'space-around', padding: 10}}>
           <TouchableOpacity 
@@ -1143,11 +1584,20 @@ const MessageInput = () => {
           </TouchableOpacity>
           
           <TouchableOpacity 
+            onPress={showBlobErrors}
+            style={{backgroundColor: '#e74c3c', padding: 10, borderRadius: 5, flex: 1, marginLeft: 2, marginRight: 2}}
+          >
+            <Text style={{color: 'white', textAlign: 'center', fontWeight: 'bold', fontSize: 12}}>
+              🚨 Errors ({blobErrors.length})
+            </Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
             onPress={testCrossDeviceDetection}
             style={{backgroundColor: '#4a90e2', padding: 10, borderRadius: 5, flex: 1, marginLeft: 5}}
           >
             <Text style={{color: 'white', textAlign: 'center', fontWeight: 'bold'}}>
-              🔄 Test Cross-Device
+              🔄 Cross-Device
             </Text>
           </TouchableOpacity>
         </View>
