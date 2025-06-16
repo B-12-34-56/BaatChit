@@ -1,5 +1,5 @@
 import React, { useContext, useState } from 'react'
-import { View, Text, TouchableOpacity, Modal, StyleSheet, SafeAreaView } from 'react-native'
+import { View, Text, TouchableOpacity, Modal, StyleSheet, SafeAreaView, Image } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import MessageList from './chat/MessageList'
 import MessageInput from './chat/MessageInput'
@@ -30,16 +30,33 @@ const Chat = () => {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>{displayName}</Text>
-        <View style={styles.headerActions}>
-          <TouchableOpacity onPress={() => {}}>
-            <Ionicons name="videocam" size={22} color="#667eea" />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={handleAddFriend}>
-            <Ionicons name="person-add" size={22} color="#667eea" />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={handleMenuClick}>
-            <Ionicons name="ellipsis-vertical" size={22} color="#667eea" />
+        <View style={styles.chatHeader}>
+          <View style={styles.userInfo}>
+            <TouchableOpacity 
+              style={styles.backButton}
+              onPress={() => router.replace('/')}
+            >
+              <Ionicons name="arrow-back" size={24} color="#667eea" />
+            </TouchableOpacity>
+            <Image 
+              source={{ 
+                uri: data.user?.photoURL || 'https://ui-avatars.com/api/?name=' + (data.user?.displayName || 'User') 
+              }}
+              style={styles.avatar}
+            />
+            <View>
+              <Text style={styles.userName}>{data.user?.displayName}</Text>
+              <Text style={styles.userStatus}>Online</Text>
+            </View>
+          </View>
+          <TouchableOpacity 
+            onPress={() => router.push({
+              pathname: '/profile',
+              params: { userId: data.user?.uid }
+            })}
+            style={styles.profileButton}
+          >
+            <Ionicons name="person-circle-outline" size={24} color="#667eea" />
           </TouchableOpacity>
         </View>
 
@@ -113,16 +130,32 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1.5,
     borderBottomColor: '#e0e0e0',
   },
-  headerTitle: {
-    fontWeight: '700',
-    fontSize: 18,
-    color: '#3a3a5a',
-    letterSpacing: 0.2,
-  },
-  headerActions: {
+  chatHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 18,
+    gap: 12,
+  },
+  userInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  avatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+  },
+  userName: {
+    fontWeight: '700',
+    fontSize: 16,
+    color: '#3a3a5a',
+  },
+  userStatus: {
+    fontSize: 12,
+    color: '#888',
+  },
+  profileButton: {
+    padding: 8,
   },
   modalOverlay: {
     flex: 1,
@@ -180,6 +213,10 @@ const styles = StyleSheet.create({
   },
   messageListContainer: {
     flex: 1,
+  },
+  backButton: {
+    padding: 8,
+    marginRight: 8,
   },
 });
 

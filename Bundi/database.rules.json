@@ -1,0 +1,88 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isValidPhoneNumber() {
+      return request.resource.data.phoneNumber.matches('^\\+[1-9]\\d{1,14}$');
+    }
+
+    function isValidUserData() {
+      let data = request.resource.data;
+      return isValidPhoneNumber()
+        && data.createdAt is timestamp
+        && data.lastLogin is timestamp
+        && data.isActive is bool;
+    }
+
+    // Users collection
+    match /users/{userId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // User chats collection
+    match /userChats/{chatId} {
+      allow read: if request.auth != null && 
+        resource.data.participants[request.auth.uid] != null;
+      
+      allow create: if request.auth != null && 
+        request.resource.data.participants[request.auth.uid] == true;
+      
+      allow update: if request.auth != null && 
+        resource.data.participants[request.auth.uid] != null;
+
+      // Participants subcollection
+      match /participants/{memberUid} {
+        allow read: if request.auth != null && 
+          get(/databases/$(database)/documents/userChats/$(chatId)).data.participants[request.auth.uid] != null;
+        allow write: if request.auth != null && request.auth.uid == memberUid;
+      }
+
+      // Messages subcollection
+      match /messages/{messageId} {
+        allow read: if request.auth != null && 
+          get(/databases/$(database)/documents/userChats/$(chatId)).data.participants[request.auth.uid] != null;
+        
+        allow create: if request.auth != null && 
+          get(/databases/$(database)/documents/userChats/$(chatId)).data.participants[request.auth.uid] != null
+          && request.resource.data.senderUid == request.auth.uid;
+        
+        allow update, delete: if false;
+      }
+    }
+
+    // Friend Requests collection
+    match /friendRequests/{requestId} {
+      allow read: if request.auth != null && 
+        (resource.data.senderId == request.auth.uid || resource.data.receiverId == request.auth.uid);
+      allow create: if request.auth != null && 
+        request.resource.data.senderId == request.auth.uid;
+      allow update: if request.auth != null && 
+        resource.data.receiverId == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['status']);
+      allow delete: if request.auth != null && 
+        (resource.data.senderId == request.auth.uid || resource.data.receiverId == request.auth.uid);
+    }
+
+    // Conversations collection
+    match /conversations/{conversationId} {
+      allow read: if request.auth != null && 
+        (resource.data.participants[request.auth.uid] != null);
+      allow create: if request.auth != null && 
+        request.resource.data.participants[request.auth.uid] != null;
+      allow update: if request.auth != null && 
+        resource.data.participants[request.auth.uid] != null
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['lastMessage', 'lastMessageTime', 'participants']);
+      allow delete: if request.auth != null && 
+        resource.data.participants[request.auth.uid] != null;
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+} 

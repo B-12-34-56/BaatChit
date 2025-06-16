@@ -17,11 +17,12 @@
     "@react-navigation/elements": "^2.3.8",
     "@react-navigation/native": "^7.1.6",
     "@react-navigation/native-stack": "^7.3.10",
+    "eslint-config-expo": "^9.2.0",
     "expo": "~53.0.10",
     "expo-auth-session": "~6.2.0",
     "expo-blur": "~14.1.5",
     "expo-constants": "~17.1.6",
-    "expo-file-system": "~18.1.10",
+    "expo-file-system": "^18.1.10",
     "expo-font": "~13.3.1",
     "expo-haptics": "~14.1.4",
     "expo-image": "~2.2.0",
@@ -29,8 +30,10 @@
     "expo-image-picker": "~16.1.4",
     "expo-linear-gradient": "~14.1.5",
     "expo-linking": "~7.1.5",
+    "expo-media-library": "^17.1.7",
     "expo-random": "^14.0.1",
     "expo-router": "~5.0.7",
+    "expo-sharing": "^13.1.5",
     "expo-splash-screen": "~0.30.9",
     "expo-status-bar": "~2.2.3",
     "expo-symbols": "~0.4.5",
@@ -48,13 +51,13 @@
     "react-native-screens": "~4.11.1",
     "react-native-toast-message": "^2.3.0",
     "react-native-web": "~0.20.0",
-    "react-native-webview": "13.13.5"
+    "react-native-webview": "13.13.5",
+    "rn-fetch-blob": "^0.12.0"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
     "@types/react": "~19.0.10",
-    "eslint": "^9.25.0",
-    "eslint-config-expo": "~9.2.0",
+    "eslint": "^9.29.0",
     "typescript": "~5.8.3"
   },
   "private": true

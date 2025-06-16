@@ -8,150 +8,94 @@ import {
   Dimensions,
   Platform,
   StatusBar,
-  SafeAreaView
+  SafeAreaView,
+  Alert
 } from 'react-native';
-import { PinchGestureHandler } from 'react-native-gesture-handler';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
-  useAnimatedGestureHandler,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
-  withTiming,
 } from 'react-native-reanimated';
+import * as FileSystem from 'expo-file-system';
+import * as MediaLibrary from 'expo-media-library';
+import * as Sharing from 'expo-sharing';
+import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
 const ImageViewerModal = ({ visible, imageUrl, onClose }) => {
-  const scale = useSharedValue(1);
-  const focalX = useSharedValue(0);
-  const focalY = useSharedValue(0);
-  const translateX = useSharedValue(0);
-  const translateY = useSharedValue(0);
-
-  const pinchHandler = useAnimatedGestureHandler({
-    onActive: (event) => {
-      scale.value = event.scale;
-      focalX.value = event.focalX;
-      focalY.value = event.focalY;
-    },
-    onEnd: () => {
-      if (scale.value < 1) {
-        scale.value = withSpring(1);
-        translateX.value = withSpring(0);
-        translateY.value = withSpring(0);
-      } else if (scale.value > 3) {
-        scale.value = withSpring(3);
-      }
-    },
-  });
-
-  const animatedStyle = useAnimatedStyle(() => {
-    return {
-      transform: [
-        { translateX: translateX.value },
-        { translateY: translateY.value },
-        { translateX: focalX.value },
-        { translateY: focalY.value },
-        { scale: scale.value },
-        { translateX: -focalX.value },
-        { translateY: -focalY.value },
-      ],
-    };
-  });
-
-  const resetZoom = () => {
-    scale.value = withTiming(1);
-    translateX.value = withTiming(0);
-    translateY.value = withTiming(0);
+  const downloadImage = async () => {
+    try {
+      const fileUri = FileSystem.documentDirectory + 'image.jpg';
+      const { uri } = await FileSystem.downloadAsync(imageUrl, fileUri);
+      await MediaLibrary.saveToLibraryAsync(uri);
+      alert('Image saved to gallery!');
+    } catch (error) {
+      console.error('Error downloading image:', error);
+      alert('Failed to download image');
+    }
   };
 
   return (
     <Modal
       visible={visible}
-      transparent={false}
+      transparent={true}
       animationType="fade"
       onRequestClose={onClose}
-      statusBarTranslucent
     >
-      <SafeAreaView style={styles.container}>
-        <StatusBar backgroundColor="black" barStyle="light-content" />
-        
-        {/* Header */}
+      <View style={styles.modalContainer}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-            <Text style={styles.closeText}>✕</Text>
+          <TouchableOpacity onPress={downloadImage} style={styles.button}>
+            <Ionicons name="download-outline" size={24} color="white" />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={onClose} style={styles.button}>
+            <Ionicons name="close" size={24} color="white" />
           </TouchableOpacity>
         </View>
-
-        {/* Image */}
+        
         <View style={styles.imageContainer}>
-          <PinchGestureHandler onGestureEvent={pinchHandler}>
-            <Animated.View style={styles.imageWrapper}>
-              <TouchableOpacity 
-                activeOpacity={1} 
-                onPress={resetZoom}
-                style={styles.imageTouchable}
-              >
-                <Animated.Image
-                  source={{ uri: imageUrl }}
-                  style={[styles.image, animatedStyle]}
-                  resizeMode="contain"
-                />
-              </TouchableOpacity>
-            </Animated.View>
-          </PinchGestureHandler>
+          <Image
+            source={{ uri: imageUrl }}
+            style={styles.image}
+            contentFit="contain"
+          />
         </View>
-      </SafeAreaView>
+      </View>
     </Modal>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
+  modalContainer: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: 'rgba(0, 0, 0, 0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   header: {
     position: 'absolute',
-    top: Platform.OS === 'ios' ? 50 : 30,
-    left: 0,
-    right: 0,
+    top: 40,
+    right: 20,
     zIndex: 1,
     flexDirection: 'row',
-    justifyContent: 'flex-end',
-    paddingHorizontal: 20,
+    gap: 10,
   },
-  closeButton: {
-    width: 40,
-    height: 40,
+  button: {
+    padding: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  closeText: {
-    color: '#fff',
-    fontSize: 24,
-    fontWeight: 'bold',
   },
   imageContainer: {
-    flex: 1,
+    width: screenWidth,
+    height: screenHeight * 0.8,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  imageWrapper: {
-    width: screenWidth,
-    height: screenHeight,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  imageTouchable: {
-    width: screenWidth,
-    height: screenHeight,
   },
   image: {
-    width: screenWidth,
-    height: screenHeight,
+    width: '100%',
+    height: '100%',
   },
 });
 
