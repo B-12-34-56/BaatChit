@@ -1,5 +1,6 @@
 import React, { useContext, useState } from "react";
-import { View, Text, Image, TouchableOpacity } from "react-native";
+import { View, Text, TouchableOpacity } from "react-native";
+import { Image } from 'expo-image';
 import { ChatContext } from "../context/ChatContext";
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth } from '../utils/firebase';
@@ -20,7 +21,6 @@ const Message = ({ message }) => {
 
   const handleImagePress = (imageUrl) => {
     if (!imageUrl) return;
-    // Instead of opening URL, show the image viewer
     setSelectedImage(imageUrl);
     setImageViewerVisible(true);
   };
@@ -51,6 +51,7 @@ const Message = ({ message }) => {
               borderRadius: 19,
               marginBottom: 4,
             }}
+            contentFit="cover"
           />
           <Text style={{ 
             fontSize: 11, 
@@ -75,7 +76,6 @@ const Message = ({ message }) => {
           shadowRadius: 8,
           elevation: 3,
         }}>
-          {/* Show text if it exists and it's not just an image placeholder */}
           {message.text && !message.text.startsWith('[Image:') && (
             <Text style={{ 
               color: isOwner ? 'white' : '#222',
@@ -87,7 +87,6 @@ const Message = ({ message }) => {
             </Text>
           )}
           
-          {/* Handle new image format with imageUrl */}
           {message.type === 'image' && message.imageUrl && (
             <View style={{ 
               marginTop: message.text && !message.text.startsWith('[Image:') ? 8 : 0 
@@ -102,8 +101,8 @@ const Message = ({ message }) => {
                     width: 220, 
                     height: 150,
                     borderRadius: 10,
-                    resizeMode: 'cover',
                   }}
+                  contentFit="cover"
                 />
               </TouchableOpacity>
               {message.imageTag && (
@@ -121,7 +120,6 @@ const Message = ({ message }) => {
             </View>
           )}
           
-          {/* Support old format if any messages still use it */}
           {message.img && !message.imageUrl && (
             <TouchableOpacity 
               onPress={() => handleImagePress(message.img)}
@@ -134,15 +132,14 @@ const Message = ({ message }) => {
                   width: 220, 
                   height: 150,
                   borderRadius: 10,
-                  resizeMode: 'cover',
-                }} 
+                }}
+                contentFit="cover"
               />
             </TouchableOpacity>
           )}
         </View>
       </View>
 
-      {/* Image Viewer Modal */}
       <ImageViewerModal
         visible={imageViewerVisible}
         imageUrl={selectedImage}

@@ -201,6 +201,35 @@ const Sidebar = () => {
         backgroundColor: 'rgba(255,255,255,0.95)',
       }}>
         <Navbar />
+        
+        {/* Search Section */}
+        <View style={{
+          marginVertical: 10,
+          backgroundColor: '#f8f9fa',
+          borderRadius: 12,
+          padding: 12,
+          borderWidth: 1,
+          borderColor: '#e0e0e0',
+        }}>
+          <TouchableOpacity
+            onPress={() => router.push('/search')}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+            }}
+          >
+            <Ionicons name="search" size={20} color="#667eea" />
+            <Text style={{
+              marginLeft: 8,
+              fontSize: 16,
+              color: '#667eea',
+              fontWeight: '600',
+            }}>
+              Search Users
+            </Text>
+          </TouchableOpacity>
+        </View>
+
         <View style={{ 
           marginVertical: 10,
           backgroundColor: '#f8f9fa',
@@ -215,20 +244,25 @@ const Sidebar = () => {
 
       {/* Friends Section */}
       <View style={{
+        flex: 1,
         paddingHorizontal: 18,
         paddingTop: 18,
-        paddingBottom: 10,
-        borderBottomWidth: 1.5,
-        borderBottomColor: '#e0e0e0',
         backgroundColor: 'rgba(255,255,255,0.92)',
       }}>
         <Text style={{
           fontSize: 18,
           fontWeight: '600',
           color: '#333',
-          marginBottom: 12,
+          marginBottom: 4,
         }}>
           Friends
+        </Text>
+        <Text style={{
+          fontSize: 13,
+          color: '#666',
+          marginBottom: 12,
+        }}>
+          Click on a friend to start a new chat
         </Text>
         {loading ? (
           <ActivityIndicator size="small" color="#667eea" />
@@ -258,71 +292,6 @@ const Sidebar = () => {
             contentContainerStyle={{ paddingBottom: 12 }}
           />
         )}
-      </View>
-
-      {/* Search Section */}
-      <View style={{
-        paddingHorizontal: 18,
-        paddingTop: 18,
-        paddingBottom: 10,
-        borderBottomWidth: 1.5,
-        borderBottomColor: '#e0e0e0',
-        backgroundColor: 'rgba(255,255,255,0.92)',
-      }}>
-        <TouchableOpacity
-          onPress={() => router.push('/search')}
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            backgroundColor: '#f8f9fa',
-            borderRadius: 12,
-            padding: 12,
-            borderWidth: 1,
-            borderColor: '#e0e0e0',
-          }}
-        >
-          <Ionicons name="search" size={20} color="#667eea" />
-          <Text style={{
-            marginLeft: 8,
-            fontSize: 16,
-            color: '#667eea',
-            fontWeight: '600',
-          }}>
-            Search Users
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Conversations Section */}
-      <View style={{
-        flex: 1,
-        paddingHorizontal: 18,
-        paddingTop: 18,
-        backgroundColor: 'rgba(255,255,255,0.92)',
-      }}>
-        <Text style={{
-          fontSize: 18,
-          fontWeight: '600',
-          color: '#333',
-          marginBottom: 12,
-        }}>
-          Conversations
-        </Text>
-        <ConversationList 
-          onSelect={(conv) => {
-            if (conv?.otherUser) {
-              dispatch({
-                type: 'CHANGE_USER',
-                payload: {
-                  uid: conv.otherUser.uid,
-                  displayName: conv.otherUser.displayName,
-                  photoURL: conv.otherUser.photoURL,
-                  chatId: conv.id
-                }
-              });
-            }
-          }} 
-        />
       </View>
     </LinearGradient>
   );

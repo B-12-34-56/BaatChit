@@ -60,7 +60,6 @@ const UserSearch = () => {
         friendRequestService.getOutgoingRequests(currentUser.uid)
       ]);
       setFriends(friendsList.map(u => u.uid));
-      // FIXED: Changed from 'to' to 'receiverId'
       setOutgoing(outgoingReqs.map(r => r.receiverId));
     }
     fetchStatus();
@@ -286,4 +285,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default UserSearch;
+export default UserSearch; 
