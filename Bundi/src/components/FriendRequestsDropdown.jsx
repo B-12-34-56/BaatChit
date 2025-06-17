@@ -1,4 +1,3 @@
-// FriendRequestsDropdown.js - React Native conversion of FriendRequestsDropdown.jsx
 import React, { useEffect, useState, useRef } from 'react';
 import { 
   View, 
@@ -52,7 +51,7 @@ const FriendRequestsDropdown = () => {
     // Query for incoming friend requests
     const q = query(
       collection(db, 'friendRequests'),
-      where('to', '==', currentUser.uid),
+      where('receiverId', '==', currentUser.uid),
       where('status', '==', 'pending')
     );
 
@@ -62,13 +61,13 @@ const FriendRequestsDropdown = () => {
         
         try {
           const reqs = [];
-          for (const doc of snapshot.docs) {
+          for (const docSnap of snapshot.docs) {
             try {
-              const data = doc.data();
+              const data = docSnap.data();
               const fromUser = await getDoc(doc(db, 'users', data.from));
               if (fromUser.exists()) {
                 reqs.push({
-                  id: doc.id,
+                  id: docSnap.id,
                   ...data,
                   fromUser: fromUser.data()
                 });
