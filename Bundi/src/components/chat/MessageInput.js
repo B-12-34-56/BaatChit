@@ -20,7 +20,7 @@ import { ChatContext } from '../../context/ChatContext';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth } from '../../utils/firebase';
 import { messageService } from '../../services/messageService';
-import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { getStorage, ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import { getFirestore, doc, getDoc, setDoc, updateDoc, serverTimestamp, collection, getDocs, query, where, limit, orderBy, deleteDoc } from "firebase/firestore";
 import Ionicons from '@expo/vector-icons/Ionicons';
 
@@ -913,8 +913,22 @@ async function uploadImageToFirebase(imageUri, userId, fileHash, imageFile) {
     console.log('Uploading with metadata:', metadata);
     console.log('Storage path:', `user_uploads/${userId}/${fileName}`);
     
-    await uploadBytes(storageRef, blob, metadata);
+    // Use uploadBytesResumable instead of uploadBytes
+    const uploadTask = uploadBytesResumable(storageRef, blob, metadata);
+    
+    // Wait for upload to complete
+    await new Promise((resolve, reject) => {
+      uploadTask.on('state_changed', 
+        null,
+        (error) => reject(error),
+        () => resolve()
+      );
+    });
+    
     const downloadURL = await getDownloadURL(storageRef);
+    
+    // Clean up the blob to prevent memory leaks
+    blob.close();
     
     console.log('Upload successful, download URL:', downloadURL);
     return downloadURL;

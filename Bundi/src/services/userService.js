@@ -79,13 +79,40 @@ export async function searchUsersByEmail(email) {
 export async function searchUsers(queryStr) {
   try {
     const usersRef = collection(db, 'users');
-    const q = query(
+    const queryLower = queryStr.toLowerCase();
+    
+    // Search by display name
+    const nameQuery = query(
       usersRef, 
       where('displayName', '>=', queryStr), 
       where('displayName', '<=', queryStr + '\uf8ff')
     );
-    const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map(doc => doc.data());
+    
+    // Search by email
+    const emailQuery = query(
+      usersRef,
+      where('email', '>=', queryLower),
+      where('email', '<=', queryLower + '\uf8ff')
+    );
+    
+    // Execute both queries
+    const [nameSnapshot, emailSnapshot] = await Promise.all([
+      getDocs(nameQuery),
+      getDocs(emailQuery)
+    ]);
+    
+    // Combine results and remove duplicates
+    const nameResults = nameSnapshot.docs.map(doc => ({ ...doc.data(), uid: doc.id }));
+    const emailResults = emailSnapshot.docs.map(doc => ({ ...doc.data(), uid: doc.id }));
+    
+    // Use a Map to deduplicate by uid
+    const resultsMap = new Map();
+    
+    [...nameResults, ...emailResults].forEach(user => {
+      resultsMap.set(user.uid, user);
+    });
+    
+    return Array.from(resultsMap.values());
   } catch (error) {
     console.error('Error searching users:', error);
     return [];

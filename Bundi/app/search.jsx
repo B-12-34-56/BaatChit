@@ -38,14 +38,22 @@ const Search = () => {
         minHeight: 600,
         overflow: 'hidden',
       }}>
-        {/* Back Button */}
-        <TouchableOpacity
-          onPress={() => router.replace('/home')}
-          style={{ padding: 16, position: 'absolute', left: 0, top: 0, zIndex: 10 }}
-        >
-          <Ionicons name="arrow-back" size={28} color="#667eea" />
-        </TouchableOpacity>
-        <Navbar />
+        <View style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          paddingHorizontal: 12,
+        }}>
+          <TouchableOpacity 
+            style={{
+              padding: 8,
+              marginRight: 8,
+            }}
+            onPress={() => router.back()}
+          >
+            <Ionicons name="arrow-back" size={24} color="#667eea" />
+          </TouchableOpacity>
+          <Navbar />
+        </View>
         <UserSearch />
       </View>
     </LinearGradient>
