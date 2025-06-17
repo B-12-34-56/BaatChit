@@ -1,12 +1,15 @@
 import React from 'react';
-import { View, StatusBar, Dimensions } from 'react-native';
+import { View, StatusBar, Dimensions, TouchableOpacity } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Navbar from '../src/components/Navbar';
 import UserSearch from '../src/components/friends/UserSearch';
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 
 const { width } = Dimensions.get('window');
 
 const Search = () => {
+  const router = useRouter();
   return (
     <LinearGradient
       colors={['#667eea', '#764ba2']}
@@ -35,6 +38,13 @@ const Search = () => {
         minHeight: 600,
         overflow: 'hidden',
       }}>
+        {/* Back Button */}
+        <TouchableOpacity
+          onPress={() => router.replace('/home')}
+          style={{ padding: 16, position: 'absolute', left: 0, top: 0, zIndex: 10 }}
+        >
+          <Ionicons name="arrow-back" size={28} color="#667eea" />
+        </TouchableOpacity>
         <Navbar />
         <UserSearch />
       </View>

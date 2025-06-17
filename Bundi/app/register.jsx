@@ -79,6 +79,15 @@ const Register = () => {
       return;
     }
 
+    if (password.length < 8 || password.length > 20) {
+      Toast.show({
+        type: 'error',
+        text1: 'Password must be 8-20 characters',
+      });
+      setLoading(false);
+      return;
+    }
+
     if (password !== confirmPassword) {
       Toast.show({
         type: 'error',
@@ -107,13 +116,6 @@ const Register = () => {
         photoURL: `https://ui-avatars.com/api/?name=${displayName}&background=667eea&color=fff&bold=true`
       });
 
-      // Send email verification
-      await sendEmailVerification(res.user);
-      Toast.show({
-        type: 'success',
-        text1: 'Verification email sent! Please check your inbox.',
-      });
-
       // Create user document in Firestore
       await setDoc(doc(db, "users", res.user.uid), {
         uid: res.user.uid,
@@ -124,15 +126,14 @@ const Register = () => {
         createdAt: new Date(),
         lastActive: new Date(),
         isOnline: true,
-        bio: "",
-        emailVerified: false
+        bio: ""
       });
 
       // Create empty user chats document
       await setDoc(doc(db, "userChats", res.user.uid), {});
 
-      // Navigate to email verification page
-      router.push("/verify-email");
+      // Navigate to home instead of verify-email
+      router.push("/home");
     } catch (err) {
       console.error(err);
       if (err.code === "auth/email-already-in-use") {
