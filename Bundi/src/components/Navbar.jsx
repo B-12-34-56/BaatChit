@@ -6,10 +6,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { signOut } from 'firebase/auth';
 import { auth } from '../utils/firebase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useRouter } from 'expo-router';
+import { useRouter, usePathname } from 'expo-router';
 
 const Navbar = () => {
   const router = useRouter();
+  const pathname = usePathname();
+  const isProfileView = pathname === '/profile';
 
   const handleLogout = () => {
     Alert.alert(
@@ -69,15 +71,17 @@ const Navbar = () => {
         </Text>
       </View>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-        <TouchableOpacity 
-          onPress={handleProfile}
-          style={{
-            padding: 8,
-            borderRadius: 8,
-          }}
-        >
-          <Ionicons name="person-circle-outline" size={24} color="#667eea" />
-        </TouchableOpacity>
+        {!isProfileView && (
+          <TouchableOpacity 
+            onPress={handleProfile}
+            style={{
+              padding: 8,
+              borderRadius: 8,
+            }}
+          >
+            <Ionicons name="person-circle-outline" size={24} color="#667eea" />
+          </TouchableOpacity>
+        )}
         <TouchableOpacity 
           onPress={handleLogout}
           style={{
