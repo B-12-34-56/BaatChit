@@ -83,6 +83,11 @@ const Login = () => {
 
     const { email, password } = formData;
 
+    if (password.length < 8 || password.length > 20) {
+      Alert.alert('Warning', 'Password should be 8-20 characters.');
+      // Do not return; allow login to proceed
+    }
+
     try {
       if (rememberMe) {
         await AsyncStorage.setItem('rememberMe', 'true');
@@ -94,12 +99,6 @@ const Login = () => {
       
       const res = await signInWithEmailAndPassword(auth, email, password);
       
-      if (!res.user.emailVerified) {
-        Alert.alert("Email Verification", "Please verify your email before logging in.");
-        router.push('/verify-email');
-        return;
-      }
-
       await updateDoc(doc(db, "users", res.user.uid), {
         isOnline: true,
         lastActive: new Date()
