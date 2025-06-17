@@ -1,5 +1,5 @@
 import React, { useContext, useState } from 'react'
-import { View, Text, TouchableOpacity, Modal, StyleSheet, SafeAreaView, Image } from 'react-native'
+import { View, Text, TouchableOpacity, Modal, StyleSheet, SafeAreaView, Image, KeyboardAvoidingView, Platform } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import MessageList from './chat/MessageList'
 import MessageInput from './chat/MessageInput'
@@ -105,12 +105,16 @@ const Chat = () => {
         </Modal>
       </View>
       
-      <View style={styles.chatContent}>
+      <KeyboardAvoidingView 
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.chatContent}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 0}
+      >
         <View style={styles.messageListContainer}>
           <MessageList />
         </View>
         <MessageInput />
-      </View>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   )
 }
@@ -121,102 +125,98 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
   },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 24,
-    paddingVertical: 18,
-    backgroundColor: 'rgba(255,255,255,0.95)',
-    borderBottomWidth: 1.5,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
+    paddingTop: 8,
+    paddingBottom: 8,
   },
   chatHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
   },
   userInfo: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    flex: 1,
+  },
+  backButton: {
+    padding: 8,
+    marginRight: 8,
   },
   avatar: {
     width: 40,
     height: 40,
     borderRadius: 20,
+    marginRight: 12,
   },
   userName: {
-    fontWeight: '700',
     fontSize: 16,
-    color: '#3a3a5a',
+    fontWeight: '600',
+    color: '#2d3748',
   },
   userStatus: {
-    fontSize: 12,
-    color: '#888',
+    fontSize: 13,
+    color: '#718096',
   },
   profileButton: {
     padding: 8,
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(44,62,80,0.18)',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   menuDropdown: {
-    backgroundColor: 'white',
-    borderRadius: 10,
-    minWidth: 120,
-    paddingVertical: 8,
-    shadowColor: '#2c3e50',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 8,
+    minWidth: 200,
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.13,
-    shadowRadius: 12,
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
     elevation: 5,
   },
   menuItem: {
-    paddingHorizontal: 18,
-    paddingVertical: 10,
+    padding: 12,
+    borderRadius: 8,
   },
   menuItemText: {
-    color: '#3a3a5a',
-    fontWeight: '600',
-    fontSize: 15,
-    textAlign: 'left',
+    fontSize: 16,
+    color: '#2d3748',
   },
   addFriendModal: {
-    backgroundColor: 'white',
-    borderRadius: 18,
-    padding: 32,
-    minWidth: 320,
-    maxWidth: '90%',
-    shadowColor: '#2c3e50',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.18,
-    shadowRadius: 24,
-    elevation: 8,
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    width: '90%',
+    maxHeight: '80%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
   addFriendHeader: {
-    position: 'absolute',
-    top: 10,
-    right: 16,
-    zIndex: 1,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
   },
   closeButton: {
-    fontSize: 22,
-    color: '#888',
-    fontWeight: 'bold',
+    fontSize: 24,
+    color: '#718096',
+    padding: 8,
   },
   chatContent: {
     flex: 1,
-    justifyContent: 'flex-end',
   },
   messageListContainer: {
     flex: 1,
-  },
-  backButton: {
-    padding: 8,
-    marginRight: 8,
   },
 });
 
