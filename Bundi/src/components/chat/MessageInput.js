@@ -1008,49 +1008,47 @@ const MessageInput = () => {
 
   // Add error catching useEffect
   useEffect(() => {
-    const originalConsoleError = console.error;
-    const originalConsoleWarn = console.warn;
-    
-    console.error = (...args) => {
-      const errorString = args.join(' ');
-      if (errorString.includes('RCTBlobManager') || errorString.includes('attempt to insert nil object')) {
-        console.log('🚨 [MessageInput] RCTBlobManager error captured:', {
-          timestamp: new Date().toISOString(),
-          args: args,
-          currentImageUri: imageUri ? imageUri.substring(0, 50) + '...' : 'none',
-          currentImageFile: imageFile ? {
-            fileName: imageFile.fileName,
-            type: imageFile.type,
-            size: imageFile.fileSize
-          } : 'none',
-          uploading: uploading
-        });
-        
-        setBlobErrors(prev => [...prev, {
-          timestamp: Date.now(),
-          error: errorString,
-          context: {
-            hasImageUri: !!imageUri,
-            hasImageFile: !!imageFile,
+    // Only override console in development
+    if (__DEV__) {
+      const originalConsoleError = console.error;
+      const originalConsoleWarn = console.warn;
+      
+      console.error = (...args) => {
+        const errorString = args.join(' ');
+        if (errorString.includes('RCTBlobManager') || errorString.includes('attempt to insert nil object')) {
+          console.log('🚨 [MessageInput] RCTBlobManager error captured:', {
+            timestamp: new Date().toISOString(),
+            args: args,
+            currentImageUri: imageUri ? imageUri.substring(0, 50) + '...' : 'none',
+            currentImageFile: imageFile ? {
+              fileName: imageFile.fileName,
+              type: imageFile.type,
+              size: imageFile.fileSize
+            } : 'none',
             uploading: uploading
-          }
-        }]);
-      }
-      originalConsoleError.apply(console, args);
-    };
-    
-    console.warn = (...args) => {
-      const warnString = args.join(' ');
-      if (warnString.includes('RCTBlobManager')) {
-        console.log('⚠️ [MessageInput] RCTBlobManager warning captured:', args);
-      }
-      originalConsoleWarn.apply(console, args);
-    };
-    
-    return () => {
-      console.error = originalConsoleError;
-      console.warn = originalConsoleWarn;
-    };
+          });
+          
+          setBlobErrors(prev => [...prev, {
+            timestamp: Date.now(),
+            error: errorString,
+            context: {
+              hasImageUri: !!imageUri,
+              hasImageFile: !!imageFile,
+              uploading: uploading
+            }
+          }]);
+        }
+        originalConsoleError.apply(console, args);
+      };
+      
+      console.warn = (...args) => {
+        const warnString = args.join(' ');
+        if (warnString.includes('RCTBlobManager')) {
+          console.log('⚠️ [MessageInput] RCTBlobManager warning captured:', args);
+        }
+        originalConsoleWarn.apply(console, args);
+      };
+    }
   }, [imageUri, imageFile, uploading]);
 
   useEffect(() => {

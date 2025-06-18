@@ -1,3 +1,11 @@
+// Disable console methods in production
+if (!__DEV__) {
+  console.log = () => {};
+  console.warn = () => {};
+  console.error = () => {};
+  console.debug = () => {};
+}
+
 import 'react-native-gesture-handler';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { useAuthState } from 'react-firebase-hooks/auth';
