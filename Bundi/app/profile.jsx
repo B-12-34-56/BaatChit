@@ -12,13 +12,13 @@ import {
   KeyboardAvoidingView,
   Platform
 } from "react-native";
-import { db, storage } from "../utils/firebase";
+import { db, storage } from "../src/utils/firebase";
 import { doc, updateDoc } from "firebase/firestore";
 import { updateProfile } from "firebase/auth";
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import { useNavigation } from "@react-navigation/native";
 import { useAuthState } from 'react-firebase-hooks/auth';
-import { auth } from '../utils/firebase';
+import { auth } from '../src/utils/firebase';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';

@@ -1,0 +1,59 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "S3PresignedUploadAccess",
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:GetObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::2314823894myawsbucket/images/*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:SecureTransport": "true"
+        },
+        "StringLike": {
+          "s3:x-amz-content-sha256": "*"
+        }
+      }
+    },
+    {
+      "Sid": "S3ListBucketAccess",
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::2314823894myawsbucket"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:SecureTransport": "true"
+        },
+        "StringLike": {
+          "s3:prefix": "images/*"
+        }
+      }
+    },
+    {
+      "Sid": "DynamoDBUploadTracking",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:GetItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:PutItem"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:us-east-1:*:table/ImageSignatures"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:SecureTransport": "true"
+        }
+      }
+    }
+  ]
+} 

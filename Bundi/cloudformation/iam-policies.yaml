@@ -1,0 +1,236 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'IAM Policies for Presigned URL Upload System'
+
+Parameters:
+  BucketName:
+    Type: String
+    Default: '2314823894myawsbucket'
+    Description: 'Name of the S3 bucket'
+  
+  DynamoDBTableName:
+    Type: String
+    Default: 'ImageSignatures'
+    Description: 'Name of the DynamoDB table for upload tracking'
+  
+  Environment:
+    Type: String
+    Default: 'development'
+    AllowedValues: ['development', 'staging', 'production']
+    Description: 'Environment name'
+
+Resources:
+  # IAM Policy for Presigned URL Uploads (minimal permissions)
+  PresignedUploadPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub '${Environment}-presigned-upload-policy'
+      Description: 'Minimal IAM policy for presigned URL uploads'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          # S3 Access - restricted to images folder only
+          - Sid: S3PresignedUploadAccess
+            Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:GetObject
+            Resource: !Sub 'arn:aws:s3:::${BucketName}/images/*'
+            Condition:
+              StringEquals:
+                aws:SecureTransport: true
+              StringLike:
+                s3:x-amz-content-sha256: '*'
+          
+          # S3 List Access - restricted to images folder
+          - Sid: S3ListBucketAccess
+            Effect: Allow
+            Action:
+              - s3:ListBucket
+            Resource: !Sub 'arn:aws:s3:::${BucketName}'
+            Condition:
+              StringEquals:
+                aws:SecureTransport: true
+              StringLike:
+                s3:prefix: 'images/*'
+          
+          # DynamoDB Access - only for upload tracking
+          - Sid: DynamoDBUploadTracking
+            Effect: Allow
+            Action:
+              - dynamodb:GetItem
+              - dynamodb:UpdateItem
+              - dynamodb:PutItem
+            Resource: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DynamoDBTableName}'
+            Condition:
+              StringEquals:
+                aws:SecureTransport: true
+      
+      # Tags for organization
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Purpose
+          Value: 'Presigned URL Uploads'
+        - Key: ManagedBy
+          Value: 'CloudFormation'
+
+  # IAM Role for Lambda Functions (if using Lambda for presigned URL generation)
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${Environment}-presigned-upload-lambda-role'
+      Description: 'IAM role for Lambda functions handling presigned URL generation'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      
+      # Attach managed policies
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - !Ref PresignedUploadPolicy
+      
+      # Additional Lambda-specific permissions
+      Policies:
+        - PolicyName: LambdaS3PresignedUrlPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Generate presigned URLs
+              - Sid: GeneratePresignedUrls
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource: !Sub 'arn:aws:s3:::${BucketName}/images/*'
+                Condition:
+                  StringEquals:
+                    aws:SecureTransport: true
+              
+              # List bucket for presigned URL generation
+              - Sid: ListBucketForPresignedUrls
+                Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource: !Sub 'arn:aws:s3:::${BucketName}'
+                Condition:
+                  StringEquals:
+                    aws:SecureTransport: true
+      
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Purpose
+          Value: 'Lambda Execution for Presigned URLs'
+
+  # IAM User for direct access (if needed)
+  PresignedUploadUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Sub '${Environment}-presigned-upload-user'
+      ManagedPolicyArns:
+        - !Ref PresignedUploadPolicy
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Purpose
+          Value: 'Presigned URL Uploads'
+
+  # Access Key for the user (if needed)
+  PresignedUploadAccessKey:
+    Type: AWS::IAM::AccessKey
+    Properties:
+      UserName: !Ref PresignedUploadUser
+      Status: Active
+
+  # Cognito Unauthenticated Role (if using Cognito)
+  CognitoUnauthRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${Environment}-cognito-unauth-role'
+      Description: 'IAM role for unauthenticated Cognito users'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: cognito-identity.amazonaws.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                'cognito-identity.amazonaws.com:aud': !Sub '${CognitoIdentityPoolId}'
+              'ForAnyValue:StringLike':
+                'cognito-identity.amazonaws.com:amr': unauthenticated
+      
+      # Attach the minimal upload policy
+      ManagedPolicyArns:
+        - !Ref PresignedUploadPolicy
+      
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Purpose
+          Value: 'Cognito Unauthenticated Access'
+
+  # Cognito Authenticated Role (if using Cognito)
+  CognitoAuthRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${Environment}-cognito-auth-role'
+      Description: 'IAM role for authenticated Cognito users'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: cognito-identity.amazonaws.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                'cognito-identity.amazonaws.com:aud': !Sub '${CognitoIdentityPoolId}'
+              'ForAnyValue:StringLike':
+                'cognito-identity.amazonaws.com:amr': authenticated
+      
+      # Attach the minimal upload policy
+      ManagedPolicyArns:
+        - !Ref PresignedUploadPolicy
+      
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Purpose
+          Value: 'Cognito Authenticated Access'
+
+Outputs:
+  PresignedUploadPolicyArn:
+    Description: 'ARN of the presigned upload policy'
+    Value: !Ref PresignedUploadPolicy
+    Export:
+      Name: !Sub '${AWS::StackName}-PolicyArn'
+  
+  LambdaExecutionRoleArn:
+    Description: 'ARN of the Lambda execution role'
+    Value: !Ref LambdaExecutionRole
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaRoleArn'
+  
+  PresignedUploadUserArn:
+    Description: 'ARN of the presigned upload user'
+    Value: !Ref PresignedUploadUser
+    Export:
+      Name: !Sub '${AWS::StackName}-UserArn'
+  
+  CognitoUnauthRoleArn:
+    Description: 'ARN of the Cognito unauthenticated role'
+    Value: !Ref CognitoUnauthRole
+    Export:
+      Name: !Sub '${AWS::StackName}-CognitoUnauthRoleArn'
+  
+  CognitoAuthRoleArn:
+    Description: 'ARN of the Cognito authenticated role'
+    Value: !Ref CognitoAuthRole
+    Export:
+      Name: !Sub '${AWS::StackName}-CognitoAuthRoleArn' 

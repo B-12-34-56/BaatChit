@@ -1,0 +1,227 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'S3 Bucket Configuration for Presigned URL Uploads'
+
+Parameters:
+  BucketName:
+    Type: String
+    Default: '2314823894myawsbucket'
+    Description: 'Name of the S3 bucket'
+  
+  Environment:
+    Type: String
+    Default: 'development'
+    AllowedValues: ['development', 'staging', 'production']
+    Description: 'Environment name'
+
+Resources:
+  # S3 Bucket
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref BucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false        # Allow public ACLs for presigned URLs
+        IgnorePublicAcls: false       # Don't ignore public ACLs
+        BlockPublicPolicy: true       # Block public bucket policies (security)
+        RestrictPublicBuckets: true   # Restrict public bucket access (security)
+      
+      # CORS Configuration for presigned URL uploads
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - 'Content-Type'
+              - 'Content-Length'
+              - 'x-amz-content-sha256'
+              - 'x-amz-date'
+              - 'x-amz-security-token'
+              - 'Authorization'
+              - 'Origin'
+              - 'Accept'
+              - 'Cache-Control'
+              - 'Pragma'
+            AllowedMethods:
+              - GET
+              - PUT
+              - POST
+              - HEAD
+              - DELETE
+            AllowedOrigins:
+              # Expo development
+              - 'exp://localhost:8081'
+              - 'exp://192.168.*.*:8081'
+              - 'exp://10.*.*.*:8081'
+              - 'exp://172.*.*.*:8081'
+              # App scheme
+              - 'bundikitab://*'
+              # Web development
+              - 'http://localhost:3000'
+              - 'http://localhost:19006'
+              - 'https://localhost:3000'
+              - 'https://localhost:19006'
+              # Expo Go
+              - 'exp://exp.host'
+              - 'exp://u.expo.dev'
+              # Development wildcard (remove in production)
+              - '*'
+            ExposeHeaders:
+              - 'ETag'
+              - 'x-amz-version-id'
+              - 'x-amz-delete-marker'
+              - 'x-amz-expiration'
+              - 'x-amz-restore'
+              - 'x-amz-storage-class'
+              - 'x-amz-request-id'
+              - 'x-amz-id-2'
+            MaxAge: 3000
+      
+      # Versioning for data protection
+      VersioningConfiguration:
+        Status: Enabled
+      
+      # Server-side encryption
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      
+      # Lifecycle policy (optional - adjust based on your needs)
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteIncompleteMultipartUploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+      
+      # Tags
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Purpose
+          Value: 'Presigned URL Uploads'
+        - Key: ManagedBy
+          Value: 'CloudFormation'
+
+  # Bucket Policy (restrictive - only allow authorized access)
+  S3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          # Deny public read access
+          - Sid: DenyPublicRead
+            Effect: Deny
+            Principal: '*'
+            Action:
+              - s3:GetObject
+            Resource: !Sub '${S3Bucket}/*'
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+          
+          # Allow presigned URL uploads (handled by IAM roles)
+          - Sid: AllowPresignedUploads
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action:
+              - s3:PutObject
+              - s3:GetObject
+            Resource: !Sub '${S3Bucket}/*'
+            Condition:
+              StringEquals:
+                aws:SecureTransport: true
+
+  # IAM Role for Lambda functions
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${BucketName}-lambda-execution-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3AccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:DeleteObject
+                  - s3:PutObjectAcl
+                Resource: !Sub '${S3Bucket}/*'
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource: !Ref S3Bucket
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  # DynamoDB Table for upload tracking
+  UploadTrackingTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${BucketName}-upload-tracking'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: ContentHash
+          AttributeType: S
+      KeySchema:
+        - AttributeName: ContentHash
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: TTL
+        Enabled: true
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Purpose
+          Value: 'Upload Tracking'
+
+  # CloudWatch Log Group for Lambda functions
+  LambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${BucketName}-upload-handler'
+      RetentionInDays: 14
+
+Outputs:
+  BucketName:
+    Description: 'Name of the S3 bucket'
+    Value: !Ref S3Bucket
+    Export:
+      Name: !Sub '${AWS::StackName}-BucketName'
+  
+  BucketArn:
+    Description: 'ARN of the S3 bucket'
+    Value: !GetAtt S3Bucket.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-BucketArn'
+  
+  LambdaExecutionRoleArn:
+    Description: 'ARN of the Lambda execution role'
+    Value: !GetAtt LambdaExecutionRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaRoleArn'
+  
+  UploadTrackingTableName:
+    Description: 'Name of the DynamoDB table for upload tracking'
+    Value: !Ref UploadTrackingTable
+    Export:
+      Name: !Sub '${AWS::StackName}-TableName'
+  
+  UploadTrackingTableArn:
+    Description: 'ARN of the DynamoDB table for upload tracking'
+    Value: !GetAtt UploadTrackingTable.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-TableArn' 

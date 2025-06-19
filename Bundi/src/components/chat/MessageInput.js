@@ -64,27 +64,27 @@ async function getFileHash(uri) {
   }
 }
 
-// Replace uploadImageToFirebase with S3 upload
-async function uploadImageToS3(imageUri, userId, fileHash, imageFile) {
-  try {
-    // Use the hybrid storageService (which will use S3 for user uploads)
-    const uploadResult = await uploadUserContent(imageFile, userId);
-    return uploadResult.downloadURL;
-  } catch (error) {
-    console.error('Error uploading to S3:', error);
-    throw error;
-  }
-}
-
 // Main upload handler (replaces handleCrossDeviceUpload)
 async function handleS3Upload(imageUri, imageFile, currentUser) {
   try {
+    console.log('🚀 [handleS3Upload] Starting S3 upload process...', {
+      imageUri: imageUri?.substring(0, 50) + '...',
+      fileName: imageFile?.fileName,
+      userId: currentUser?.uid
+    });
+
     // Step 1: Generate file hash
+    console.log('📝 [handleS3Upload] Generating file hash...');
     const fileHash = await getFileHash(imageUri);
+    console.log('✅ [handleS3Upload] File hash generated:', fileHash?.substring(0, 12) + '...');
 
     // Step 2: Check S3 count using centralized API helpers
+    console.log('🔍 [handleS3Upload] Checking upload count...');
     const count = await apiHelpers.getImageUploadCount(fileHash);
+    console.log('📊 [handleS3Upload] Current upload count:', count);
+    
     if (count >= 3) {
+      console.log('🚫 [handleS3Upload] Upload blocked - count >= 3');
       return {
         imageUrl: null,
         imageHash: fileHash,
@@ -96,13 +96,19 @@ async function handleS3Upload(imageUri, imageFile, currentUser) {
     }
 
     // Step 3: Upload to S3
+    console.log('📤 [handleS3Upload] Uploading to S3...');
     const imageUrl = await uploadImageToS3(imageUri, currentUser.uid, fileHash, imageFile);
+    console.log('✅ [handleS3Upload] S3 upload completed:', imageUrl?.substring(0, 50) + '...');
 
     // Step 4: Increment S3 count using centralized API helpers
+    console.log('➕ [handleS3Upload] Incrementing upload count...');
     await apiHelpers.incrementImageUploadCount(fileHash, currentUser.uid, imageFile?.fileName || 'image.jpg');
 
     // Step 5: Re-check count after increment
+    console.log('🔍 [handleS3Upload] Re-checking upload count...');
     const newCount = await apiHelpers.getImageUploadCount(fileHash);
+    console.log('📊 [handleS3Upload] New upload count:', newCount);
+    
     const isBlocked = newCount >= 3;
     const isWarning = newCount === 2;
     let warningMessage = '';
@@ -114,6 +120,7 @@ async function handleS3Upload(imageUri, imageFile, currentUser) {
       warningMessage = '✅ New image ready to upload';
     }
 
+    console.log('🎉 [handleS3Upload] Upload process completed successfully');
     return {
       imageUrl,
       imageHash: fileHash,
@@ -123,11 +130,17 @@ async function handleS3Upload(imageUri, imageFile, currentUser) {
       totalCount: newCount,
     };
   } catch (error) {
+    console.error('❌ [handleS3Upload] Upload failed:', error);
+    console.error('❌ [handleS3Upload] Error details:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    });
     return {
       imageUrl: null,
       imageHash: null,
       imageTag: 'error',
-      warningMessage: 'Error uploading image. Please try again.',
+      warningMessage: error.message || 'Error uploading image. Please try again.',
       blocked: false,
       totalCount: 0,
     };
@@ -1023,7 +1036,16 @@ const MessageInput = () => {
         imageHash = uploadResult.imageHash;
         imageTag = uploadResult.imageTag;
         warningMessage = uploadResult.warningMessage;
+        
+        console.log('📋 [handleSend] Upload result:', {
+          imageUrl: imageUrl?.substring(0, 50) + '...',
+          imageHash: imageHash?.substring(0, 12) + '...',
+          imageTag,
+          warningMessage,
+          blocked: uploadResult.blocked
+        });
       } catch (err) {
+        console.error('❌ [handleSend] Upload error:', err);
         Alert.alert('Upload Failed', `Image upload failed: ${err.message || 'Unknown error'}`);
         setUploading(false);
         return;
@@ -1032,8 +1054,15 @@ const MessageInput = () => {
     }
     
     // *** IMPORTANT: Only send message if we have a valid upload (or text-only message) ***
-    // The imageUrl check ensures we only send if upload succeeded AND wasn't blocked
-    if (!imageUri || (imageUrl && imageTag !== 'blocked')) {
+    // Send message if: no image OR (has image AND upload succeeded with valid URL)
+    console.log('🔍 [handleSend] Checking send condition:', {
+      hasImageUri: !!imageUri,
+      hasImageUrl: !!imageUrl,
+      imageTag,
+      condition: !imageUri || imageUrl
+    });
+    
+    if (!imageUri || imageUrl) {
       try {
         console.log('📤 Sending message...');
         await messageService.sendMessage(
