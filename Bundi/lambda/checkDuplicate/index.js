@@ -1,185 +1,386 @@
 // ===========================
-// BACKEND SERVICE: CheckDuplicate
+// PURE AWS LAMBDA: CheckDuplicate with Perceptual Hashing
 // ===========================
-const express = require('express');
-const cors = require('cors');
+// NO Firebase dependencies - runs entirely on AWS
+
 const AWS = require('aws-sdk');
-const imageHash = require('node-image-hash');
 const sharp = require('sharp');
+const { generateRobustHash, compareHashes, binaryToHex } = require('./imageHash');
 
-const app = express();
-const PORT = process.env.PORT || 3001;
-
-// Middleware
-app.use(cors());
-app.use(express.json({ limit: '50mb' })); // Handle large base64 images
-
-// AWS Configuration
-const ddb = new AWS.DynamoDB.DocumentClient();
+// AWS Services - NO Firebase
+const dynamodb = new AWS.DynamoDB.DocumentClient();
 const s3 = new AWS.S3();
 
-// DynamoDB table for storing perceptual hashes
-const HASH_TABLE = 'ImagePerceptualHashes';
-const MAX_UPLOADS = 3;
+// Configuration
+const IMAGES_TABLE = process.env.IMAGES_TABLE || 'ImagePerceptualHashes';
+const MAX_UPLOADS = parseInt(process.env.MAX_UPLOADS || '3');
+const SIMILARITY_THRESHOLD = parseInt(process.env.SIMILARITY_THRESHOLD || '25');
 
-// Configure AWS (use environment variables or IAM roles)
-AWS.config.update({
-  region: process.env.AWS_REGION || 'us-east-1',
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
-});
+// ===========================
+// CROSS-DEVICE DUPLICATE DETECTION
+// ===========================
 
-// Main duplicate check endpoint
-app.post('/check-duplicate', async (req, res) => {
+/**
+ * Find similar images across devices using enhanced perceptual hashing
+ */
+async function findSimilarImages(hashData, threshold = SIMILARITY_THRESHOLD) {
   try {
-    let imageBuffer;
-    let originalHash = null;
-    
-    const { imageData, fileHash, userId } = req.body;
-    
-    // Option 1: Client sends the image data
-    if (imageData) {
-      imageBuffer = Buffer.from(imageData, 'base64');
-    }
-    // Option 2: Client sends S3 key of staged image
-    else if (req.body.s3Key && req.body.bucket) {
-      const obj = await s3.getObject({
-        Bucket: req.body.bucket,
-        Key: req.body.s3Key
-      }).promise();
-      imageBuffer = obj.Body;
-    }
-    
-    // Store original file hash if provided (for logging)
-    originalHash = fileHash;
-    
-    if (!imageBuffer) {
-      return res.status(400).json({ error: 'No image data provided' });
-    }
-    
-    console.log('Processing image for user:', userId);
-    
-    // Normalize image for consistent hashing
-    const normalizedBuffer = await sharp(imageBuffer)
-      .resize(256, 256, { fit: 'cover' }) // Normalize size
-      .grayscale() // Convert to grayscale
-      .toBuffer();
-    
-    // Compute perceptual hash (dHash)
-    const hashResult = await imageHash.hash(normalizedBuffer, 8, 'hex');
-    const perceptualHash = hashResult.hash;
-    
-    console.log('Perceptual hash computed:', perceptualHash);
-    
-    // Check and update DynamoDB
-    const updateParams = {
-      TableName: process.env.HASH_TABLE,
-      Key: { perceptualHash: perceptualHash },
-      UpdateExpression: 'SET #count = if_not_exists(#count, :zero) + :inc, lastUpload = :timestamp, #uploads = list_append(if_not_exists(#uploads, :empty), :upload)',
-      ExpressionAttributeNames: { 
-        '#count': 'uploadCount',
-        '#uploads': 'uploadHistory'
-      },
-      ExpressionAttributeValues: { 
-        ':zero': 0, 
-        ':inc': 1, 
-        ':max': MAX_UPLOADS,
-        ':timestamp': new Date().toISOString(),
-        ':empty': [],
-        ':upload': [{
-          timestamp: new Date().toISOString(),
-          originalHash: originalHash,
-          userId: userId || 'anonymous'
-        }]
-      },
-      ConditionExpression: 'attribute_not_exists(#count) OR #count < :max',
-      ReturnValues: 'ALL_NEW'
+    const params = {
+      TableName: IMAGES_TABLE
     };
     
-    try {
-      const result = await ddb.update(updateParams).promise();
-      const newCount = result.Attributes.uploadCount;
-      
-      // Generate pre-signed URL for upload
-      const uploadKey = `images/${perceptualHash}_${Date.now()}.jpg`;
-      const uploadUrl = await s3.getSignedUrlPromise('putObject', {
-        Bucket: process.env.S3_BUCKET,
-        Key: uploadKey,
-        Expires: 300,
-        ContentType: 'image/jpeg'
-      });
-      
-      console.log(`✅ Upload allowed for hash ${perceptualHash}, count: ${newCount}`);
-      
-      return res.json({
-        allowed: true,
-        uploadUrl: uploadUrl,
-        perceptualHash: perceptualHash,
-        uploadCount: newCount,
-        isDuplicate: newCount > 1,
-        message: newCount === 2 ? 'Warning: This image has been uploaded twice' : 'Upload allowed'
-      });
-      
-    } catch (err) {
-      if (err.code === 'ConditionalCheckFailedException') {
-        // Upload limit reached
-        console.log('Upload blocked - limit reached for hash:', perceptualHash);
+    const result = await dynamodb.scan(params).promise();
+    const similar = [];
+    
+    console.log(`🔍 Scanning ${result.Items.length} images for similarities...`);
+    
+    for (const item of result.Items) {
+      if (item.perceptualHash !== hashData.perceptualHash) {
+        // Create hash object for comparison
+        const existingHashData = {
+          perceptualHash: item.perceptualHash,
+          averageHash: item.averageHash,
+          dctHash: item.dctHash,
+          colorHash: item.colorHash
+        };
         
-        return res.status(409).json({
-          allowed: false,
-          perceptualHash: perceptualHash,
-          uploadCount: MAX_UPLOADS,
-          isDuplicate: true,
-          message: `Upload blocked: This image has already been uploaded ${MAX_UPLOADS} times`
-        });
+        const comparison = compareHashes(hashData, existingHashData, threshold);
+        if (comparison.isSimilar) {
+          similar.push({
+            hash: item.perceptualHash,
+            distance: comparison.distance,
+            uploadCount: item.uploadCount || 0,
+            firstUpload: item.firstUpload,
+            lastUpload: item.lastUpload
+          });
+          
+          console.log(`🎯 Found similar image: ${item.perceptualHash.substring(0, 16)}... (distance: ${comparison.distance})`);
+        }
       }
-      throw err;
     }
     
+    console.log(`✅ Found ${similar.length} similar images`);
+    return similar;
   } catch (error) {
-    console.error('Error processing duplicate check:', error);
-    return res.status(500).json({ error: 'Internal server error' });
+    console.error('Error finding similar images:', error);
+    return [];
   }
-});
+}
 
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.json({ status: 'OK', timestamp: new Date().toISOString() });
-});
-
-// Test endpoint for debugging
-app.post('/test-hash', async (req, res) => {
+/**
+ * Calculate total upload count including similar images
+ */
+async function calculateTotalUploadCount(hashData, baseCount = 0) {
   try {
-    const { imageData } = req.body;
-    if (!imageData) {
-      return res.status(400).json({ error: 'No image data provided' });
+    const similarImages = await findSimilarImages(hashData, SIMILARITY_THRESHOLD);
+    
+    let totalCount = baseCount;
+    const similarDetails = [];
+    
+    for (const similar of similarImages) {
+      totalCount += similar.uploadCount;
+      similarDetails.push({
+        hash: similar.hash,
+        distance: similar.distance,
+        uploadCount: similar.uploadCount
+      });
     }
     
-    const imageBuffer = Buffer.from(imageData, 'base64');
-    const normalizedBuffer = await sharp(imageBuffer)
-      .resize(256, 256, { fit: 'cover' })
-      .grayscale()
-      .toBuffer();
+    console.log(`📊 Total upload count: ${totalCount} (base: ${baseCount}, similar: ${totalCount - baseCount})`);
     
-    const hashResult = await imageHash.hash(normalizedBuffer, 8, 'hex');
-    
-    res.json({
-      perceptualHash: hashResult.hash,
-      originalSize: imageBuffer.length,
-      normalizedSize: normalizedBuffer.length
-    });
+    return {
+      totalCount,
+      similarCount: similarImages.length,
+      similarDetails
+    };
   } catch (error) {
-    console.error('Test hash error:', error);
-    res.status(500).json({ error: 'Hash computation failed' });
+    console.error('Error calculating total upload count:', error);
+    return {
+      totalCount: baseCount,
+      similarCount: 0,
+      similarDetails: []
+    };
   }
-});
+}
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`🚀 Duplicate check service running on port ${PORT}`);
-  console.log(`📊 DynamoDB Table: ${HASH_TABLE}`);
-  console.log(`🪣 S3 Bucket: ${process.env.S3_BUCKET}`);
-  console.log(`🔗 Health check: http://localhost:${PORT}/health`);
-});
+// ===========================
+// AWS LAMBDA HANDLER
+// ===========================
 
-module.exports = app; 
+exports.handler = async (event) => {
+  console.log('AWS Lambda processing image upload');
+  
+  try {
+    let imageBuffer, userId, fileName, fileHash;
+    
+    // Handle API Gateway request (pre-upload check)
+    if (event.httpMethod === 'POST') {
+      const body = JSON.parse(event.body);
+      
+      if (!body.imageData) {
+        return {
+          statusCode: 400,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ error: 'No image data provided' })
+        };
+      }
+      
+      imageBuffer = Buffer.from(body.imageData, 'base64');
+      userId = body.userId || 'anonymous';
+      fileName = body.fileName || 'unnamed.jpg';
+      fileHash = body.fileHash || null; // SHA-256 from client
+    }
+    // Handle S3 trigger (post-upload processing)
+    else if (event.Records && event.Records[0].s3) {
+      const s3Event = event.Records[0].s3;
+      const bucket = s3Event.bucket.name;
+      const key = decodeURIComponent(s3Event.object.key.replace(/\+/g, ' '));
+      
+      // Download image from S3
+      const s3Object = await s3.getObject({ Bucket: bucket, Key: key }).promise();
+      imageBuffer = s3Object.Body;
+      userId = s3Object.Metadata?.userid || 'anonymous';
+      fileName = key;
+      fileHash = s3Object.Metadata?.filehash || null;
+    }
+    else {
+      return {
+        statusCode: 400,
+        body: JSON.stringify({ error: 'Invalid event type' })
+      };
+    }
+    
+    // Generate enhanced perceptual hash (visual fingerprint)
+    console.log('🔍 Generating robust perceptual hash...');
+    const hashData = await generateRobustHash(imageBuffer);
+    const perceptualHash = hashData.perceptualHash; // This is already in hex format
+    
+    console.log('✅ Perceptual hash generated:', {
+      perceptualHash: perceptualHash.substring(0, 16) + '...',
+      averageHashLength: hashData.averageHash?.length || 0,
+      dctHashLength: hashData.dctHash?.length || 0,
+      colorHashLength: hashData.colorHash?.length || 0
+    });
+    
+    // Check if this exact image already exists
+    const existingItem = await dynamodb.get({
+      TableName: IMAGES_TABLE,
+      Key: { perceptualHash: perceptualHash }
+    }).promise();
+    
+    let uploadCount = 0;
+    let blocked = false;
+    let message = 'Upload allowed';
+    let similarImages = [];
+    
+    if (existingItem.Item) {
+      // Exact image already exists - check count
+      uploadCount = existingItem.Item.uploadCount || 0;
+      
+      // Calculate total count including similar images
+      const totalCountData = await calculateTotalUploadCount(hashData, uploadCount);
+      
+      if (totalCountData.totalCount >= MAX_UPLOADS) {
+        blocked = true;
+        message = `This image (or similar versions) has been uploaded ${totalCountData.totalCount} times. Maximum allowed: ${MAX_UPLOADS}.`;
+        similarImages = totalCountData.similarDetails;
+        
+        // If S3 triggered and blocked, delete the file
+        if (event.Records) {
+          const s3Event = event.Records[0].s3;
+          await s3.deleteObject({
+            Bucket: s3Event.bucket.name,
+            Key: decodeURIComponent(s3Event.object.key.replace(/\+/g, ' '))
+          }).promise();
+          console.log('🗑️ Deleted blocked image from S3');
+        }
+      } else {
+        // Increment count for exact match
+        await dynamodb.update({
+          TableName: IMAGES_TABLE,
+          Key: { perceptualHash: perceptualHash },
+          UpdateExpression: 'SET uploadCount = uploadCount + :inc, lastUpload = :time, uploads = list_append(uploads, :upload)',
+          ExpressionAttributeValues: {
+            ':inc': 1,
+            ':time': new Date().toISOString(),
+            ':upload': [{
+              userId: userId,
+              fileName: fileName,
+              timestamp: new Date().toISOString()
+            }]
+          }
+        }).promise();
+        
+        uploadCount++;
+        message = `Image uploaded successfully. This exact image has now been uploaded ${uploadCount} time(s).`;
+      }
+    } else {
+      // New image - check for similar images first
+      const totalCountData = await calculateTotalUploadCount(hashData, 0);
+      
+      if (totalCountData.totalCount >= MAX_UPLOADS) {
+        blocked = true;
+        message = `Similar images have been uploaded ${totalCountData.totalCount} times. Maximum allowed: ${MAX_UPLOADS}.`;
+        similarImages = totalCountData.similarDetails;
+        
+        // If S3 triggered and blocked, delete the file
+        if (event.Records) {
+          const s3Event = event.Records[0].s3;
+          await s3.deleteObject({
+            Bucket: s3Event.bucket.name,
+            Key: decodeURIComponent(s3Event.object.key.replace(/\+/g, ' '))
+          }).promise();
+          console.log('🗑️ Deleted blocked image from S3');
+        }
+      } else {
+        // Store all hash components in DynamoDB
+        await dynamodb.put({
+          TableName: IMAGES_TABLE,
+          Item: {
+            perceptualHash: perceptualHash,
+            fileHash: fileHash, // SHA-256 from client
+            averageHash: hashData.averageHash,
+            dctHash: hashData.dctHash,
+            colorHash: hashData.colorHash,
+            uploadCount: 1,
+            firstUpload: new Date().toISOString(),
+            lastUpload: new Date().toISOString(),
+            uploads: [{
+              userId: userId,
+              fileName: fileName,
+              timestamp: new Date().toISOString()
+            }]
+          }
+        }).promise();
+        
+        uploadCount = 1;
+        message = 'New image uploaded successfully.';
+        similarImages = totalCountData.similarDetails;
+      }
+    }
+    
+    // For API Gateway response
+    if (event.httpMethod === 'POST') {
+      if (blocked) {
+        return {
+          statusCode: 409,
+          headers: { 
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*'
+          },
+          body: JSON.stringify({
+            allowed: false,
+            blocked: true,
+            perceptualHash: perceptualHash,
+            uploadCount: uploadCount,
+            totalCount: uploadCount + similarImages.reduce((sum, img) => sum + img.uploadCount, 0),
+            similarImages: similarImages,
+            message: message
+          })
+        };
+      } else {
+        // Generate pre-signed URL for upload
+        const uploadKey = `uploads/${perceptualHash}_${Date.now()}.jpg`;
+        const uploadUrl = await s3.getSignedUrlPromise('putObject', {
+          Bucket: process.env.S3_BUCKET,
+          Key: uploadKey,
+          Expires: 300,
+          ContentType: 'image/jpeg'
+        });
+        
+        return {
+          statusCode: 200,
+          headers: { 
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*'
+          },
+          body: JSON.stringify({
+            allowed: true,
+            blocked: false,
+            uploadUrl: uploadUrl,
+            perceptualHash: perceptualHash,
+            uploadCount: uploadCount,
+            totalCount: uploadCount + similarImages.reduce((sum, img) => sum + img.uploadCount, 0),
+            similarImages: similarImages,
+            message: message
+          })
+        };
+      }
+    }
+    
+    // For S3 trigger - just return success
+    return { statusCode: 200 };
+    
+  } catch (error) {
+    console.error('Lambda error:', error);
+    return {
+      statusCode: 500,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        error: 'Internal server error',
+        message: error.message 
+      })
+    };
+  }
+};
+
+// ===========================
+// ADDITIONAL FUNCTIONS
+// ===========================
+
+/**
+ * Get upload statistics for an image including similar images
+ */
+exports.getImageStats = async (event) => {
+  const { perceptualHash } = JSON.parse(event.body || '{}');
+  
+  if (!perceptualHash) {
+    return {
+      statusCode: 400,
+      body: JSON.stringify({ error: 'perceptualHash required' })
+    };
+  }
+  
+  try {
+    const result = await dynamodb.get({
+      TableName: IMAGES_TABLE,
+      Key: { perceptualHash: perceptualHash }
+    }).promise();
+    
+    if (!result.Item) {
+      return {
+        statusCode: 404,
+        body: JSON.stringify({ error: 'Image not found' })
+      };
+    }
+    
+    // Create hash data object for similarity search
+    const hashData = {
+      perceptualHash: result.Item.perceptualHash,
+      averageHash: result.Item.averageHash,
+      dctHash: result.Item.dctHash,
+      colorHash: result.Item.colorHash
+    };
+    
+    // Find similar images
+    const similarImages = await findSimilarImages(hashData, SIMILARITY_THRESHOLD);
+    
+    return {
+      statusCode: 200,
+      body: JSON.stringify({
+        perceptualHash: perceptualHash,
+        uploadCount: result.Item.uploadCount,
+        firstUpload: result.Item.firstUpload,
+        lastUpload: result.Item.lastUpload,
+        uploads: result.Item.uploads,
+        similarImages: similarImages,
+        totalSimilarCount: similarImages.reduce((sum, img) => sum + img.uploadCount, 0)
+      })
+    };
+  } catch (error) {
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: 'Internal server error' })
+    };
+  }
+}; 

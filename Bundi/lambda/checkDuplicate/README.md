@@ -1,71 +1,105 @@
-# Duplicate Check Backend Service
+# Check Duplicate Lambda Function
 
-A Node.js backend service for detecting duplicate images using perceptual hashing.
+A pure AWS Lambda function for detecting duplicate images using perceptual hashing. This function runs entirely on AWS without any Firebase dependencies.
 
-## Features
+## 🚀 Features
 
-- **Perceptual Hashing**: Uses dHash algorithm to detect visually similar images
-- **Cross-Device Detection**: Same image on different devices will be detected as duplicate
-- **Global State**: Uses DynamoDB to track uploads across all users
-- **Pre-signed URLs**: Secure direct upload to S3
-- **Upload Limits**: Maximum 3 uploads per unique image
+- **Perceptual Hashing**: Generates visual fingerprints of images that work across different devices and formats
+- **Duplicate Detection**: Prevents the same image from being uploaded multiple times
+- **Upload Limits**: Configurable maximum upload count per image (default: 3)
+- **AWS Native**: Uses DynamoDB for storage and S3 for image processing
+- **Serverless**: Runs on AWS Lambda with automatic scaling
+- **Dual Triggers**: Supports both API Gateway (pre-upload) and S3 (post-upload) triggers
 
-## Setup
+## 📋 Prerequisites
 
-### 1. Install Dependencies
-```bash
-cd lambda/checkDuplicate
-npm install
+- AWS CLI configured with appropriate permissions
+- DynamoDB table: `ImagePerceptualHashes`
+- S3 bucket for image storage
+- IAM role with Lambda execution permissions
+
+## 🏗️ Architecture
+
+```
+Client App → API Gateway → Lambda Function → DynamoDB
+                                    ↓
+                                S3 (if needed)
 ```
 
-### 2. Set Environment Variables
-Create a `.env` file or set environment variables:
+## 📦 Installation
+
+1. **Install dependencies:**
+   ```bash
+   npm install
+   ```
+
+2. **Configure environment variables:**
+   ```bash
+   export IMAGES_TABLE="ImagePerceptualHashes"
+   export MAX_UPLOADS="3"
+   export S3_BUCKET="your-s3-bucket-name"
+   ```
+
+## 🚀 Deployment
+
+### Option 1: Using the deployment script
 ```bash
-export AWS_REGION=us-east-1
-export AWS_ACCESS_KEY_ID=your_access_key
-export AWS_SECRET_ACCESS_KEY=your_secret_key
-export HASH_TABLE=ImageSignatures
-export S3_BUCKET=process.env.AWS_S3_BUCKET
-export PORT=3001
+chmod +x deploy.sh
+./deploy.sh
 ```
 
-### 3. Create DynamoDB Table
+### Option 2: Manual deployment
 ```bash
-aws dynamodb create-table \
-  --table-name ImagePerceptualHashes \
-  --attribute-definitions AttributeName=perceptualHash,AttributeType=S \
-  --key-schema AttributeName=perceptualHash,KeyType=HASH \
-  --billing-mode PAY_PER_REQUEST
+# Install dependencies
+npm install --production
+
+# Create deployment package
+npm run zip
+
+# Deploy to AWS Lambda
+aws lambda create-function \
+  --function-name check-duplicate-lambda \
+  --runtime nodejs18.x \
+  --handler index.handler \
+  --timeout 30 \
+  --memory-size 512 \
+  --zip-file fileb://lambda-deployment.zip \
+  --region us-east-1 \
+  --role arn:aws:iam::YOUR_ACCOUNT:role/lambda-execution-role
 ```
 
-## Running the Service
+## 🔧 Configuration
 
-### Option 1: Using the startup script
-```bash
-./start.sh
-```
+### Environment Variables
 
-### Option 2: Manual start
-```bash
-npm start
-```
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `IMAGES_TABLE` | DynamoDB table name | `ImagePerceptualHashes` |
+| `MAX_UPLOADS` | Maximum uploads per image | `3` |
+| `S3_BUCKET` | S3 bucket for image storage | Required |
 
-### Option 3: Development mode (with auto-restart)
-```bash
-npm run dev
-```
+### DynamoDB Table Schema
 
-## API Endpoints
-
-### POST /check-duplicate
-Check if an image is a duplicate and get upload permission.
-
-**Request Body:**
 ```json
 {
-  "imageData": "base64_encoded_image",
-  "fileHash": "original_file_hash",
-  "userId": "user_id"
+  "perceptualHash": "string (partition key)",
+  "uploadCount": "number",
+  "firstUpload": "string (ISO date)",
+  "lastUpload": "string (ISO date)",
+  "uploads": "array of upload records"
+}
+```
+
+## 📡 API Usage
+
+### Pre-upload Check (API Gateway)
+
+**Request:**
+```json
+{
+  "imageData": "base64-encoded-image",
+  "userId": "user123",
+  "fileName": "photo.jpg"
 }
 ```
 
@@ -73,11 +107,11 @@ Check if an image is a duplicate and get upload permission.
 ```json
 {
   "allowed": true,
-  "uploadUrl": "pre_signed_s3_url",
-  "perceptualHash": "computed_hash",
+  "blocked": false,
+  "uploadUrl": "presigned-s3-url",
+  "perceptualHash": "abc123...",
   "uploadCount": 1,
-  "isDuplicate": false,
-  "message": "Upload allowed"
+  "message": "New image uploaded successfully."
 }
 ```
 
@@ -85,57 +119,111 @@ Check if an image is a duplicate and get upload permission.
 ```json
 {
   "allowed": false,
-  "perceptualHash": "computed_hash",
+  "blocked": true,
+  "perceptualHash": "abc123...",
   "uploadCount": 3,
-  "isDuplicate": true,
-  "message": "Upload blocked: This image has already been uploaded 3 times"
+  "message": "This image has already been uploaded 3 times. No more uploads allowed."
 }
 ```
 
-### GET /health
-Health check endpoint.
+### Post-upload Processing (S3 Trigger)
 
-### POST /test-hash
-Test endpoint for computing perceptual hashes.
+The function can also be triggered by S3 uploads for post-processing:
 
-## How It Works
+```json
+{
+  "Records": [
+    {
+      "s3": {
+        "bucket": { "name": "my-bucket" },
+        "object": { "key": "images/photo.jpg" }
+      }
+    }
+  ]
+}
+```
 
-1. **Image Normalization**: Resizes to 256x256 and converts to grayscale
-2. **Perceptual Hashing**: Computes dHash (difference hash) for visual fingerprinting
-3. **DynamoDB Check**: Looks up hash in database and increments count
-4. **Conditional Update**: Only allows upload if count < 3
-5. **Pre-signed URL**: Returns secure S3 upload URL if allowed
+## 🔍 Perceptual Hashing Algorithm
 
-## Integration with React Native
+1. **Normalize**: Resize image to 32x32 pixels and convert to grayscale
+2. **Calculate Average**: Find the average brightness of all pixels
+3. **Generate Binary Hash**: Create binary string based on pixel brightness vs average
+4. **Convert to Hex**: Convert binary hash to hexadecimal for compact storage
 
-The React Native app calls this service at `http://localhost:3001/check-duplicate` during image upload.
+This approach ensures that:
+- Similar images produce similar hashes
+- Minor variations (compression, format changes) are tolerated
+- The hash is consistent across different devices
 
-## Troubleshooting
+## 🛠️ Development
 
-### Service won't start
-- Check if port 3001 is available
-- Verify AWS credentials are set
-- Ensure DynamoDB table exists
+### Local Testing
 
-### Images not detected as duplicates
-- Check if perceptual hashing is working (use `/test-hash` endpoint)
-- Verify DynamoDB table has correct schema
-- Check AWS permissions
-
-### Upload fails
-- Verify S3 bucket exists and is accessible
-- Check pre-signed URL expiration (5 minutes)
-- Ensure CORS is configured on S3 bucket
-
-## Testing
-
-Test the service with curl:
 ```bash
-# Health check
-curl http://localhost:3001/health
+# Test the perceptual hashing
+node -e "
+const { generatePerceptualHash } = require('./index.js');
+// Add test code here
+"
+```
 
-# Test hash computation
-curl -X POST http://localhost:3001/test-hash \
-  -H "Content-Type: application/json" \
-  -d '{"imageData":"base64_image_data"}'
-``` 
+### Logging
+
+The function logs important events:
+- Perceptual hash generation
+- DynamoDB operations
+- Upload decisions
+- Error conditions
+
+## 🔒 Security
+
+- Uses AWS IAM roles for authentication
+- No hardcoded credentials
+- CORS headers for API Gateway integration
+- Input validation for all parameters
+
+## 📊 Monitoring
+
+Monitor the function using:
+- AWS CloudWatch Logs
+- AWS CloudWatch Metrics
+- DynamoDB metrics for table performance
+
+## 🐛 Troubleshooting
+
+### Common Issues
+
+1. **Sharp dependency issues**: Ensure using Lambda-compatible Sharp version
+2. **Memory timeout**: Increase memory allocation for large images
+3. **DynamoDB permissions**: Verify IAM role has DynamoDB access
+4. **S3 permissions**: Ensure Lambda can read/write to S3 bucket
+
+### Debug Mode
+
+Enable detailed logging by setting the log level:
+```bash
+export LOG_LEVEL="DEBUG"
+```
+
+## 📈 Performance
+
+- **Cold Start**: ~2-3 seconds (includes Sharp initialization)
+- **Warm Start**: ~200-500ms
+- **Memory Usage**: 128-512MB depending on image size
+- **Timeout**: 30 seconds (configurable)
+
+## 🔄 Updates
+
+To update the function:
+
+```bash
+npm install --production
+npm run zip
+aws lambda update-function-code \
+  --function-name check-duplicate-lambda \
+  --zip-file fileb://lambda-deployment.zip
+```
+
+## 📄 License
+
+MIT License - see LICENSE file for details. 

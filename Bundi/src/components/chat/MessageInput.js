@@ -29,7 +29,11 @@ import { awsConfig, uploadImageToS3, getImageUploadCountDynamo, incrementImageUp
 import { getPresignedUrl } from '../../services/presignService';
 import { uploadImage } from '../../services/uploadService';
 
-// Add timing utility
+// AWS Lambda endpoints
+const LAMBDA_CHECK_DUPLICATE = process.env.REACT_APP_LAMBDA_CHECK_DUPLICATE || 'https://your-api-gateway-url/check-duplicate';
+const LAMBDA_GET_STATS = process.env.REACT_APP_LAMBDA_GET_STATS || 'https://your-api-gateway-url/get-stats';
+
+// Timing utility
 const getTimestamp = () => {
   const now = new Date();
   return {
@@ -40,7 +44,7 @@ const getTimestamp = () => {
 };
 
 // Enhanced logging utility
-const logDuplicateEvent = (event, data) => {
+const logEvent = (event, data) => {
   const timestamp = getTimestamp();
   console.log(`[${timestamp.readable}] 🔍 ${event}:`, {
     ...data,
@@ -51,9 +55,9 @@ const logDuplicateEvent = (event, data) => {
 // Get file hash using expo-crypto
 async function getFileHash(uri) {
   try {
-    // Read file as base64
-    const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
-    // Hash the base64 string
+    const base64 = await FileSystem.readAsStringAsync(uri, { 
+      encoding: FileSystem.EncodingType.Base64 
+    });
     const hash = await Crypto.digestStringAsync(
       Crypto.CryptoDigestAlgorithm.SHA256,
       base64
@@ -65,841 +69,218 @@ async function getFileHash(uri) {
   }
 }
 
-// Replace uploadImageToFirebase with S3 upload
-async function uploadImageToS3Local(imageUri, userId, fileHash, imageFile) {
+// Check for duplicates using Lambda (includes cross-device detection)
+async function checkDuplicateWithLambda(imageUri, fileHash, userId, fileName) {
   try {
-    console.log('🚀 [uploadImageToS3Local] Starting upload...', {
-      imageUri: imageUri?.substring(0, 50) + '...',
-      userId,
-      fileHash: fileHash?.substring(0, 12) + '...',
-      fileName: imageFile?.fileName
-    });
-
-    // Pass the actual fileHash to storageService
-    const uploadResult = await uploadUserContent(imageFile, userId, fileHash);
-    
-    console.log('✅ [uploadImageToS3Local] Upload result:', {
-      downloadURL: uploadResult.downloadURL?.substring(0, 50) + '...',
-      fileHash: uploadResult.fileHash?.substring(0, 12) + '...'
+    logEvent('LAMBDA_CHECK_START', {
+      fileHash: fileHash.substring(0, 12) + '...',
+      userId
     });
     
-    return uploadResult.downloadURL;
-  } catch (error) {
-    console.error('❌ [uploadImageToS3Local] Upload failed:', error);
-    throw error;
-  }
-}
-
-// Test function for DynamoDB connection
-const testDynamoConnection = async () => {
-  try {
-    const testHash = 'test_hash_' + Date.now();
-    console.log('🧪 Testing DynamoDB connection...');
-    
-    // Test get (should return 0)
-    const count1 = await getImageUploadCountDynamo(testHash);
-    console.log('✅ DynamoDB GET test - initial count:', count1);
-    
-    // Test increment
-    await incrementImageUploadCountDynamo(
-      testHash, 
-      'test_user_id',
-      'Test User',
-      'test.jpg'
-    );
-    
-    // Test get again (should return 1)
-    const count2 = await getImageUploadCountDynamo(testHash);
-    console.log('✅ DynamoDB INCREMENT test - new count:', count2);
-    
-    if (count2 !== 1) {
-      console.error('❌ DynamoDB increment not working! Expected 1, got:', count2);
-    }
-    
-  } catch (error) {
-    console.error('❌ DynamoDB test failed:', error);
-  }
-};
-
-// Main upload handler (replaces handleCrossDeviceUpload)
-async function handleS3Upload(imageUri, imageFile, currentUser) {
-  try {
-    console.log('🚀 [handleS3Upload] Starting upload with existing services...');
-    
-    // Check AWS credentials first
-    const credentialsCheck = checkAWSCredentials();
-    console.log('🔍 [handleS3Upload] Credentials check:', credentialsCheck);
-    
-    // Read image as base64 for the upload service
     const base64 = await FileSystem.readAsStringAsync(imageUri, {
       encoding: FileSystem.EncodingType.Base64,
     });
     
-    // Generate file hash
+    const response = await fetch(LAMBDA_CHECK_DUPLICATE, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        imageData: base64,
+        fileHash: fileHash,
+        userId: userId,
+        fileName: fileName
+      })
+    });
+    
+    const result = await response.json();
+    
+    logEvent('LAMBDA_CHECK_RESULT', {
+      blocked: result.blocked,
+      uploadCount: result.uploadCount,
+      totalCount: result.totalCount,
+      similarImages: result.similarImages?.length || 0
+    });
+    
+    return result;
+  } catch (error) {
+    console.error('Error checking duplicate with Lambda:', error);
+    throw error;
+  }
+}
+
+// Get image statistics from Lambda
+async function getImageStats(perceptualHash) {
+  try {
+    const response = await fetch(LAMBDA_GET_STATS, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ perceptualHash })
+    });
+    
+    return await response.json();
+  } catch (error) {
+    console.error('Error getting image stats:', error);
+    return null;
+  }
+}
+
+// Main AWS upload handler with duplicate detection
+async function handleAWSUpload(imageUri, imageFile, currentUser) {
+  const startTime = performance.now();
+  
+  try {
+    logEvent('AWS_UPLOAD_START', {
+      fileName: imageFile?.fileName,
+      fileSize: imageFile?.fileSize
+    });
+    
+    // Step 1: Generate file hash
     const fileHash = await getFileHash(imageUri);
     
-    // Try the upload service first (if available)
-    try {
-      console.log('🔄 [handleS3Upload] Trying upload service...');
-      
-      const uploadResult = await uploadImage({
-        image: base64,
-        filename: imageFile.fileName || `image_${Date.now()}_${fileHash.substring(0, 8)}.jpg`,
-        fileHash: fileHash,
-        contentType: imageFile.type || 'image/jpeg',
-        userId: currentUser.uid
+    // Step 2: Check for duplicates with Lambda (includes perceptual hashing)
+    const duplicateCheck = await checkDuplicateWithLambda(
+      imageUri, 
+      fileHash, 
+      currentUser.uid,
+      imageFile?.fileName || 'image.jpg'
+    );
+    
+    // Step 3: Handle blocking
+    if (duplicateCheck.blocked) {
+      logEvent('UPLOAD_BLOCKED', {
+        totalCount: duplicateCheck.totalCount,
+        similarImages: duplicateCheck.similarImages?.length || 0,
+        message: duplicateCheck.message
       });
       
-      if (uploadResult.success) {
-        console.log('✅ [handleS3Upload] Upload service succeeded');
-        return {
-          imageUrl: uploadResult.imageUrl,
-          imageHash: fileHash,
-          imageTag: uploadResult.uploadCount === 2 ? 'warning' : 'original',
-          warningMessage: uploadResult.message || 'Upload completed successfully',
-          blocked: uploadResult.blocked || false,
-          totalCount: uploadResult.uploadCount || 1,
-        };
-      }
-    } catch (uploadServiceError) {
-      console.warn('⚠️ Upload service failed, trying fallback:', uploadServiceError.message);
-    }
-    
-    // Fallback: Use uploadUserContent service
-    console.log('🔄 [handleS3Upload] Using uploadUserContent fallback...');
-    
-    try {
-      const uploadResult = await uploadUserContent(imageFile, currentUser.uid, fileHash);
-      
       return {
-        imageUrl: uploadResult.downloadURL,
+        imageUrl: null,
         imageHash: fileHash,
-        imageTag: 'original',
-        warningMessage: 'Upload completed (fallback method)',
-        blocked: false,
-        totalCount: 1,
+        perceptualHash: duplicateCheck.perceptualHash,
+        imageTag: 'blocked',
+        warningMessage: duplicateCheck.message,
+        blocked: true,
+        totalCount: duplicateCheck.totalCount,
+        similarImages: duplicateCheck.similarImages || [],
+        uploadCount: duplicateCheck.uploadCount
       };
-    } catch (uploadError) {
-      console.error('❌ uploadUserContent also failed:', uploadError);
+    }
+    
+    // Step 4: Upload to S3 (if we have a pre-signed URL from Lambda)
+    let imageUrl;
+    
+    if (duplicateCheck.uploadUrl) {
+      // Use the pre-signed URL from Lambda
+      const fileBlob = await fetch(imageUri).then(r => r.blob());
+      const uploadResponse = await fetch(duplicateCheck.uploadUrl, {
+        method: 'PUT',
+        body: fileBlob,
+        headers: {
+          'Content-Type': imageFile?.type || 'image/jpeg'
+        }
+      });
       
-      // Final fallback: Use direct AWS S3 upload
-      console.log('🔄 [handleS3Upload] Using direct AWS S3 upload...');
+      if (!uploadResponse.ok) {
+        throw new Error('Failed to upload to S3');
+      }
       
+      // Extract the URL without query parameters
+      imageUrl = duplicateCheck.uploadUrl.split('?')[0];
+    } else {
+      // Fallback to other upload methods
       try {
-        const s3Url = await uploadImageToS3(imageUri, currentUser.uid, fileHash, imageFile);
+        const uploadResult = await uploadImage({
+          image: await FileSystem.readAsStringAsync(imageUri, { encoding: FileSystem.EncodingType.Base64 }),
+          filename: imageFile.fileName || `image_${Date.now()}_${fileHash.substring(0, 8)}.jpg`,
+          fileHash: fileHash,
+          contentType: imageFile.type || 'image/jpeg',
+          userId: currentUser.uid
+        });
         
-        return {
-          imageUrl: s3Url,
-          imageHash: fileHash,
-          imageTag: 'original',
-          warningMessage: 'Upload completed (direct S3 method)',
-          blocked: false,
-          totalCount: 1,
-        };
-      } catch (s3Error) {
-        console.error('❌ All upload methods failed:', s3Error);
-        throw new Error('All upload methods failed');
+        if (uploadResult.success) {
+          imageUrl = uploadResult.imageUrl;
+        }
+      } catch (uploadServiceError) {
+        console.warn('Upload service failed, trying direct S3:', uploadServiceError.message);
+        
+        // Final fallback
+        imageUrl = await uploadImageToS3(imageUri, currentUser.uid, fileHash, imageFile);
       }
     }
+    
+    const duration = performance.now() - startTime;
+    
+    logEvent('AWS_UPLOAD_COMPLETE', {
+      duration: `${duration.toFixed(2)}ms`,
+      totalCount: duplicateCheck.totalCount,
+      uploadCount: duplicateCheck.uploadCount,
+      similarImages: duplicateCheck.similarImages?.length || 0
+    });
+    
+    // Determine image tag based on count
+    let imageTag = 'original';
+    if (duplicateCheck.totalCount >= 3) {
+      imageTag = 'blocked';
+    } else if (duplicateCheck.totalCount === 2) {
+      imageTag = 'warning';
+    }
+    
+    return {
+      imageUrl,
+      imageHash: fileHash,
+      perceptualHash: duplicateCheck.perceptualHash,
+      imageTag,
+      warningMessage: duplicateCheck.message,
+      blocked: false,
+      totalCount: duplicateCheck.totalCount,
+      uploadCount: duplicateCheck.uploadCount,
+      similarImages: duplicateCheck.similarImages || []
+    };
     
   } catch (error) {
-    console.error('❌ [handleS3Upload] Upload error:', error);
+    console.error('❌ AWS upload error:', error);
     return {
       imageUrl: null,
       imageHash: null,
       imageTag: 'error',
       warningMessage: error.message || 'Error uploading image',
       blocked: false,
-      totalCount: 0,
+      totalCount: 0
     };
   }
 }
 
-// Centralized error logging function
-function logError(operation, error, context = {}) {
-  const errorInfo = {
-    operation,
-    timestamp: new Date().toISOString(),
-    error: {
-      message: error.message,
-      code: error.code,
-      stack: error.stack
-    },
-    context,
-    userAgent: navigator.userAgent,
-    url: window.location.href
-  };
+// Format upload history for display
+function formatUploadHistory(similarImages, uploadCount) {
+  const allUploads = [];
   
-  console.error(`[MessageInput Error] ${operation}:`, errorInfo);
-  
-  // Optional: Send to analytics/monitoring service
-  // analyticsService.logError(errorInfo);
-  
-  return errorInfo;
-}
-
-// Update checkSimilarityGroupWithRetry with enhanced logging
-async function checkSimilarityGroupWithRetry(fileHash, maxRetries = 3, initialDelay = 1000) {
-  let retryCount = 0;
-  let delay = initialDelay;
-  const startTime = getTimestamp();
-  
-  logDuplicateEvent('SIMILARITY_CHECK_START', {
-    fileHash: fileHash.substring(0, 12) + '...',
-    maxRetries,
-    initialDelay
-  });
-  
-  while (retryCount < maxRetries) {
-    try {
-      logDuplicateEvent('SIMILARITY_CHECK_ATTEMPT', {
-        attempt: retryCount + 1,
-        maxRetries,
-        delay,
-        elapsedMs: Date.now() - startTime.unix
-      });
-      
-      const db = getFirestore();
-      const groupRef = doc(db, "similarity_groups", fileHash);
-      const groupSnap = await getDoc(groupRef);
-      
-      if (groupSnap.exists()) {
-        const groupData = groupSnap.data();
-        if (!groupData || !groupData.groupId) {
-          throw new Error('Invalid group data');
-        }
-        
-        // Check if the group was recently created
-        const groupTimestamp = groupData.updatedAt?.toDate?.() || new Date();
-        const timeSinceUpdate = Date.now() - groupTimestamp.getTime();
-        
-        logDuplicateEvent('SIMILARITY_GROUP_FOUND', {
-          groupId: groupData.groupId,
-          timeSinceUpdate,
-          groupCreatedAt: groupTimestamp.toISOString(),
-          attempt: retryCount + 1
-        });
-        
-        if (timeSinceUpdate < 30000) { // 30 seconds
-          logDuplicateEvent('SIMILARITY_GROUP_RECENT', {
-            groupId: groupData.groupId,
-            timeSinceUpdate,
-            waitingFor: delay
+  // Add uploads from similar images
+  if (similarImages && similarImages.length > 0) {
+    similarImages.forEach(img => {
+      if (img.uploads) {
+        img.uploads.forEach(upload => {
+          allUploads.push({
+            ...upload,
+            imageHash: img.hash,
+            distance: img.distance
           });
-          await new Promise(resolve => setTimeout(resolve, delay));
-          retryCount++;
-          delay *= 2;
-          continue;
-        }
-        
-        return {
-          success: true,
-          groupId: groupData.groupId,
-          timestamp: groupTimestamp,
-          attempt: retryCount + 1,
-          timeSinceUpdate
-        };
-      }
-      
-      // Check processing status
-      const processingRef = doc(db, "processing_status", fileHash);
-      const processingSnap = await getDoc(processingRef);
-      
-      if (processingSnap.exists() && processingSnap.data()?.status === 'pending') {
-        const processingData = processingSnap.data();
-        logDuplicateEvent('PROCESSING_PENDING', {
-          status: processingData.status,
-          startedAt: processingData.startedAt?.toDate?.()?.toISOString(),
-          attempt: retryCount + 1
         });
-        
-        await new Promise(resolve => setTimeout(resolve, delay));
-        retryCount++;
-        delay *= 2;
-        continue;
       }
-      
-      logDuplicateEvent('NO_SIMILARITY_GROUP', {
-        attempt: retryCount + 1,
-        hasProcessingStatus: processingSnap.exists(),
-        processingStatus: processingSnap.exists() ? processingSnap.data()?.status : 'none'
-      });
-      
-      return {
-        success: false,
-        attempt: retryCount + 1,
-        reason: 'no_group_found'
-      };
-      
-    } catch (error) {
-      logDuplicateEvent('SIMILARITY_CHECK_ERROR', {
-        error: error.message,
-        attempt: retryCount + 1,
-        stack: error.stack
-      });
-      
-      if (retryCount < maxRetries - 1) {
-        logDuplicateEvent('SIMILARITY_CHECK_RETRY', {
-          nextAttempt: retryCount + 2,
-          delay
-        });
-        await new Promise(resolve => setTimeout(resolve, delay));
-        retryCount++;
-        delay *= 2;
-      } else {
-        return {
-          success: false,
-          attempt: retryCount + 1,
-          error: error.message,
-          reason: 'max_retries_exceeded'
-        };
-      }
-    }
+    });
   }
   
-  logDuplicateEvent('SIMILARITY_CHECK_TIMEOUT', {
-    maxRetries,
-    totalTimeMs: Date.now() - startTime.unix
+  // Sort by timestamp
+  allUploads.sort((a, b) => {
+    const timeA = new Date(a.timestamp).getTime();
+    const timeB = new Date(b.timestamp).getTime();
+    return timeA - timeB;
   });
   
-  return {
-    success: false,
-    attempt: retryCount,
-    reason: 'max_retries_exceeded'
-  };
-}
-
-// Modify the similarity group check in checkDuplicateAcrossDevices
-async function checkDuplicateAcrossDevices(fileHash, retryCount = 0) {
-  if (!fileHash || typeof fileHash !== 'string') {
-    console.error('❌ Invalid fileHash provided to checkDuplicateAcrossDevices:', fileHash);
-    return {
-      isDuplicate: false,
-      isExact: false,
-      totalCount: 0,
-      detectionMethod: 'invalid_input',
-      relatedHashes: [],
-      error: 'Invalid file hash provided'
-    };
-  }
-
-  const db = getFirestore();
-  const maxRetries = 3;
-  
-  try {
-    const startTime = performance.now();
-    console.log('🔍 Starting duplicate check for hash:', fileHash.substring(0, 12) + '...');
-    
-    // STEP 1: Quick exact hash check (same device re-upload)
-    try {
-      const exactMatchRef = doc(db, "global_upload_logs", fileHash);
-      const exactMatchSnap = await getDoc(exactMatchRef);
-      
-      if (exactMatchSnap.exists()) {
-        const exactData = exactMatchSnap.data();
-        if (!exactData) {
-          console.warn('⚠️ Document exists but data is null:', fileHash);
-          throw new Error('Document data is null');
-        }
-        
-        console.log('✅ Found exact hash match (same device re-upload)');
-        
-        // Log performance
-        const duration = performance.now() - startTime;
-        console.log(`⏱️ Exact hash check completed in ${duration.toFixed(2)}ms`);
-        
-        return {
-          isDuplicate: true,
-          isExact: true,
-          totalCount: exactData.count || 0,
-          detectionMethod: 'exact_hash',
-          firstUploaderName: exactData.firstUploaderName || 'Unknown',
-          allUploads: exactData.uploads || [],
-          relatedHashes: [fileHash],
-          performanceMs: duration
-        };
-      }
-    } catch (exactCheckError) {
-      console.error('❌ Error in exact hash check:', exactCheckError);
-      // Continue to similarity check instead of failing
-    }
-    
-    // STEP 2: Check if this hash belongs to a similarity group (cross-device)
-    try {
-      const similarityResult = await checkSimilarityGroupWithRetry(fileHash);
-      
-      if (similarityResult.success) {
-        const groupId = similarityResult.groupId;
-        console.log(`✅ Found similarity group after ${similarityResult.attempt} attempts:`, groupId);
-        
-        // Get cached group count for performance
-        const groupCountRef = doc(db, "group_counts", groupId);
-        const groupCountSnap = await getDoc(groupCountRef);
-
-        // Always calculate the actual count from group members
-        const groupMembersQuery = query(
-          collection(db, "similarity_groups"),
-          where("groupId", "==", groupId)
-        );
-        const groupMembers = await getDocs(groupMembersQuery);
-
-        if (groupMembers.empty) {
-          console.warn('⚠️ No members found in group:', groupId);
-          throw new Error('No group members found');
-        }
-
-        // Calculate the real total count from all members
-        let actualTotalCount = 0;
-        const allUploads = [];
-        const relatedHashes = [];
-
-        for (const memberDoc of groupMembers.docs) {
-          const memberHash = memberDoc.id;
-          relatedHashes.push(memberHash);
-          
-          const uploadLog = await getUploadLog(memberHash);
-          if (uploadLog) {
-            actualTotalCount += uploadLog.count || 0;
-            const uploads = (uploadLog.uploads || []).map(u => ({
-              ...u,
-              imageHash: memberHash
-            }));
-            allUploads.push(...uploads);
-          }
-        }
-
-        // Sort uploads by timestamp
-        allUploads.sort((a, b) => a.timestamp - b.timestamp);
-
-        const duration = performance.now() - startTime;
-        console.log(`⏱️ Cross-device detection: ${actualTotalCount} uploads across ${relatedHashes.length} similar images (${duration.toFixed(2)}ms)`);
-
-        // If cached count exists but differs, log the discrepancy
-        if (groupCountSnap.exists()) {
-          const cachedCount = groupCountSnap.data()?.totalCount || 0;
-          if (cachedCount !== actualTotalCount) {
-            console.warn(`⚠️ Count mismatch - Cached: ${cachedCount}, Actual: ${actualTotalCount}`);
-          }
-        }
-
-        return {
-          isDuplicate: actualTotalCount > 0,
-          isExact: false,
-          totalCount: actualTotalCount,
-          detectionMethod: 'similarity_group',
-          relatedHashes: relatedHashes,
-          groupId: groupId,
-          performanceMs: duration,
-          allUploads: allUploads,
-          processingAttempts: similarityResult.attempt
-        };
-      } else {
-        console.log(`ℹ️ No similarity group found after ${similarityResult.attempt} attempts: ${similarityResult.reason}`);
-      }
-    } catch (similarityCheckError) {
-      console.error('❌ Error in similarity group check:', similarityCheckError);
-      // Continue to manual check instead of failing
-    }
-    
-    // STEP 3: Fallback - manual perceptual hash comparison
-    console.log('🔄 Performing manual perceptual hash comparison...');
-    try {
-      const result = await performManualSimilarityCheck(fileHash);
-      if (!result) {
-        throw new Error('Manual check returned null result');
-      }
-      
-      result.performanceMs = performance.now() - startTime;
-      return {
-        ...result,
-        detectionMethod: 'manual_check',
-        relatedHashes: result.relatedHashes || [fileHash]
-      };
-    } catch (manualCheckError) {
-      console.error('❌ Error in manual similarity check:', manualCheckError);
-      throw manualCheckError; // Let this error propagate for retry logic
-    }
-    
-  } catch (error) {
-    const errorInfo = logError('checkDuplicateAcrossDevices', error, {
-      fileHash,
-      retryCount,
-      operation: 'duplicate_check'
-    });
-    
-    // Retry on network errors
-    if (retryCount < maxRetries && (
-      error.code === 'unavailable' || 
-      error.code === 'deadline-exceeded' ||
-      error.code === 'permission-denied' ||
-      error.message.includes('network') ||
-      error.message.includes('timeout')
-    )) {
-      console.log(`🔄 Retrying duplicate check... (${retryCount + 1}/${maxRetries})`);
-      await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1))); // Exponential backoff
-      return checkDuplicateAcrossDevices(fileHash, retryCount + 1);
-    }
-    
-    // Return safe fallback
-    return {
-      isDuplicate: false,
-      isExact: false,
-      totalCount: 0,
-      detectionMethod: 'error_fallback',
-      relatedHashes: [fileHash],
-      error: errorInfo,
-      errorMessage: error.message
-    };
-  }
-}
-
-// Manual similarity check for immediate detection before Cloud Function completes
-async function performManualSimilarityCheck(fileHash) {
-  const db = getFirestore();
-  
-  try {
-    // Get all existing perceptual hashes
-    const hashesSnapshot = await getDocs(collection(db, "perceptual_hashes"));
-    const similarHashes = [];
-    
-    // For a new upload, we don't have perceptual hash yet, so this is limited
-    // But we can check if any existing hashes are in a group that might match
-    
-    // Get some recent uploads to check against
-    const recentUploadsQuery = query(
-      collection(db, "global_upload_logs"),
-      // Could add ordering by lastUploadedAt here if indexed
-    );
-    const recentUploads = await getDocs(recentUploadsQuery);
-    
-    let totalRelatedCount = 0;
-    
-    // This is a simplified check - the real similarity detection happens in Cloud Function
-    console.log('Manual check found no immediate similarities - relying on Cloud Function processing');
-    
-    return {
-      isDuplicate: false,
-      isExact: false,
-      totalCount: 0,
-      detectionMethod: 'manual_check',
-      relatedHashes: [fileHash]
-    };
-    
-  } catch (error) {
-    console.error('Error in manual similarity check:', error);
-    return {
-      isDuplicate: false,
-      isExact: false,
-      totalCount: 0,
-      detectionMethod: 'manual_error',
-      relatedHashes: [fileHash]
-    };
-  }
-}
-
-// Update checkAndHandleDuplicates with enhanced logging
-async function checkAndHandleDuplicates(fileHash, currentUser) {
-  const startTime = getTimestamp();
-  
-  try {
-    logDuplicateEvent('DUPLICATE_CHECK_START', {
-      fileHash: fileHash.substring(0, 12) + '...',
-      userId: currentUser?.uid
-    });
-    
-    // Get total count including similar images
-    const totalCount = await getTotalUploadCount(fileHash);
-    
-    // Define blocking conditions - Block on 3rd upload, warn on 2nd
-    const isBlocked = totalCount.totalCount >= 3;
-    const isWarning = totalCount.totalCount === 2;
-    
-    logDuplicateEvent('DUPLICATE_CHECK_RESULT', {
-      isBlocked,
-      isWarning,
-      totalCount: totalCount.totalCount,
-      relatedImages: totalCount.relatedHashes.length,
-      timeElapsedMs: Date.now() - startTime.unix
-    });
-    
-    // Prepare response object
-    const response = {
-      isBlocked,
-      isWarning,
-      totalCount: totalCount.totalCount,
-      allUploads: totalCount.allUploads || [],
-      relatedHashes: totalCount.relatedHashes || [fileHash],
-      warningMessage: '',
-      blockedMessage: '',
-      firstUploaderName: totalCount.allUploads?.[0]?.userName || 'Unknown',
-      checkTimestamp: startTime.iso
-    };
-    
-    // Set appropriate messages
-    if (isBlocked) {
-      response.blockedMessage = `Upload blocked: This image (or similar versions) has been uploaded ${totalCount.totalCount} times. Maximum allowed: 3 per unique image.`;
-      response.warningMessage = response.blockedMessage;
-      logDuplicateEvent('DUPLICATE_BLOCKED', {
-        totalCount: totalCount.totalCount,
-        relatedImages: totalCount.relatedHashes.length
-      });
-    } else if (isWarning) {
-      response.warningMessage = `⚠️ WARNING: This image has been uploaded twice before. One more upload will reach the limit.`;
-      logDuplicateEvent('DUPLICATE_WARNING', {
-        totalCount: totalCount.totalCount
-      });
-    } else {
-      response.warningMessage = '✅ New image ready to upload';
-      logDuplicateEvent('DUPLICATE_NONE', {
-        totalCount: totalCount.totalCount
-      });
-    }
-    
-    return response;
-    
-  } catch (error) {
-    logDuplicateEvent('DUPLICATE_CHECK_ERROR', {
-      error: error.message,
-      stack: error.stack,
-      timeElapsedMs: Date.now() - startTime.unix
-    });
-    
-    return {
-      isBlocked: false,
-      isWarning: false,
-      totalCount: 0,
-      allUploads: [],
-      relatedHashes: [fileHash],
-      warningMessage: '❌ Error checking duplicates. Please try again.',
-      blockedMessage: 'Error checking duplicates. Please try again.',
-      error: error.message,
-      checkTimestamp: startTime.iso
-    };
-  }
-}
-
-// Update handleCrossDeviceUpload to use helpers
-async function handleCrossDeviceUpload(imageUri, imageFile, currentUser) {
-  try {
-    const fileHash = await getFileHash(imageUri);
-    const uploadCount = await getImageUploadCountDynamo(fileHash);
-    if (uploadCount >= 2) {
-      return {
-        imageUrl: null,
-        imageHash: fileHash,
-        imageTag: 'blocked',
-        warningMessage: `Upload blocked: This image (or similar versions) has been uploaded ${uploadCount} times. Maximum allowed: 2 per unique image.`,
-        duplicateInfo: {
-          totalCount: uploadCount,
-          allUploads: [],
-          relatedHashes: [fileHash]
-        },
-        blocked: true
-      };
-    }
-    const imageUrl = await uploadImageToS3Local(imageUri, currentUser.uid, fileHash, imageFile);
-    await incrementImageUploadCountDynamo(
-      fileHash,
-      currentUser.uid,
-      currentUser.displayName || currentUser.email || 'Anonymous',
-      imageFile?.fileName || 'image.jpg'
-    );
-    return {
-      imageUrl,
-      imageHash: fileHash,
-      imageTag: 'original',
-      warningMessage: '',
-      duplicateInfo: {
-        totalCount: uploadCount + 1,
-        allUploads: [],
-        relatedHashes: [fileHash]
-      },
-      blocked: false
-    };
-  } catch (error) {
-    throw error;
-  }
-}
-
-async function incrementUploadLog(userId, userName, fileHash, fileName) {
-  const db = getFirestore();
-  const logRef = doc(db, "global_upload_logs", fileHash);
-  const logSnap = await getDoc(logRef);
-  
-  const uploadEntry = {
-    userId,
-    userName: userName || 'Anonymous',
-    timestamp: Date.now()
-  };
-  
-  if (logSnap.exists()) {
-    const currentData = logSnap.data();
-    await updateDoc(logRef, {
-      count: currentData.count + 1,
-      lastUploadedAt: serverTimestamp(),
-      fileName,
-      uploads: [...(currentData.uploads || []), uploadEntry]
-    });
-  } else {
-    await setDoc(logRef, {
-      fileHash,
-      count: 1,
-      lastUploadedAt: serverTimestamp(),
-      fileName,
-      firstUploaderId: userId,
-      firstUploaderName: userName || 'Anonymous',
-      uploads: [uploadEntry]
-    });
-  }
-}
-
-async function uploadImageToFirebase(imageUri, userId, fileHash, imageFile) {
-  try {
-    const storage = getStorage();
-    const timestamp = Date.now();
-    
-    // Debug logging
-    console.log('Upload attempt - Auth state:', {
-      userId,
-      hasAuth: !!auth.currentUser,
-      currentUserId: auth.currentUser?.uid
-    });
-    
-    // Use React Native compatible file handling instead of blob
-    const fileInfo = await FileSystem.getInfoAsync(imageUri);
-    
-    if (!fileInfo.exists) {
-      throw new Error('Selected file does not exist');
-    }
-    
-    // Read file as base64 for upload
-    const base64Data = await FileSystem.readAsStringAsync(imageUri, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
-    
-    // Convert base64 to Uint8Array for Firebase upload
-    const bytes = new Uint8Array(Buffer.from(base64Data, 'base64'));
-    
-    // Determine the correct content type and file extension
-    let contentType = 'image/jpeg'; // default
-    let fileExtension = 'jpg'; // default
-    
-    // Try multiple ways to get the content type
-    if (imageFile?.type) {
-      contentType = imageFile.type;
-    } else if (imageFile?.mimeType) {
-      contentType = imageFile.mimeType;
-    } else if (imageUri.toLowerCase().includes('.png')) {
-      contentType = 'image/png';
-    }
-    
-    // Set the correct file extension
-    if (contentType === 'image/png') {
-      fileExtension = 'png';
-    } else if (contentType === 'image/jpeg' || contentType === 'image/jpg') {
-      fileExtension = 'jpg';
-    }
-    
-    // Create filename with correct extension
-    const fileName = `image_${timestamp}_${fileHash.substring(0, 8)}.${fileExtension}`;
-    const storageRef = ref(storage, `user_uploads/${userId}/${fileName}`);
-    
-    // Debug logging for file type
-    console.log('File info:', {
-      originalType: imageFile?.type,
-      detectedContentType: contentType,
-      fileExtension: fileExtension,
-      fileName: fileName,
-      size: bytes.length
-    });
-    
-    // Upload with metadata
-    const metadata = {
-      contentType: contentType,
-      customMetadata: {
-        fileHash: fileHash,
-        uploadTimestamp: timestamp.toString(),
-        tag: 'original'
-      }
-    };
-    
-    console.log('Uploading with metadata:', metadata);
-    console.log('Storage path:', `user_uploads/${userId}/${fileName}`);
-    
-    // Use uploadBytesResumable with Uint8Array instead of blob
-    const uploadTask = uploadBytesResumable(storageRef, bytes, metadata);
-    
-    // Wait for upload to complete
-    await new Promise((resolve, reject) => {
-      uploadTask.on('state_changed', 
-        null,
-        (error) => reject(error),
-        () => resolve()
-      );
-    });
-    
-    const downloadURL = await getDownloadURL(storageRef);
-    
-    console.log('Upload successful, download URL:', downloadURL);
-    return downloadURL;
-  } catch (error) {
-    console.error('Error uploading to Firebase:', error);
-    console.error('Error details:', {
-      code: error.code,
-      message: error.message,
-      serverResponse: error.serverResponse
-    });
-    throw error;
-  }
-}
-
-// Add this function BEFORE the MessageInput component
-async function waitForSimilarityProcessing(fileHash, maxChecks = 3, checkInterval = 3000) {
-  const db = getFirestore();
-  const startTime = getTimestamp();
-  
-  logDuplicateEvent('SIMILARITY_PROCESSING_START', {
-    fileHash: fileHash.substring(0, 12) + '...',
-    maxChecks,
-    checkInterval
-  });
-  
-  for (let i = 0; i < maxChecks; i++) {
-    logDuplicateEvent('SIMILARITY_PROCESSING_CHECK', {
-      attempt: i + 1,
-      maxChecks,
-      elapsedMs: Date.now() - startTime.unix
-    });
-    
-    // Check if similarity group exists
-    const groupDoc = await getDoc(doc(db, "similarity_groups", fileHash));
-    
-    if (groupDoc.exists()) {
-      const groupData = groupDoc.data();
-      logDuplicateEvent('SIMILARITY_PROCESSING_COMPLETE', {
-        groupId: groupData.groupId,
-        attempts: i + 1,
-        totalTimeMs: Date.now() - startTime.unix
-      });
-      return true;
-    }
-    
-    // Wait before next check (except on last iteration)
-    if (i < maxChecks - 1) {
-      logDuplicateEvent('SIMILARITY_PROCESSING_WAIT', {
-        nextAttempt: i + 2,
-        waitTime: checkInterval
-      });
-      await new Promise(resolve => setTimeout(resolve, checkInterval));
-    }
-  }
-  
-  logDuplicateEvent('SIMILARITY_PROCESSING_TIMEOUT', {
-    maxChecks,
-    totalTimeMs: Date.now() - startTime.unix
-  });
-  
-  return false;
+  return allUploads;
 }
 
 const MessageInput = () => {
@@ -913,55 +294,7 @@ const MessageInput = () => {
   const [hasPermission, setHasPermission] = useState(null);
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
   const [duplicateModalData, setDuplicateModalData] = useState(null);
-  const [blobErrors, setBlobErrors] = useState([]);
   const mounted = useRef(true);
-
-  // Add error catching useEffect
-  useEffect(() => {
-    const originalConsoleError = console.error;
-    const originalConsoleWarn = console.warn;
-    
-    console.error = (...args) => {
-      const errorString = args.join(' ');
-      if (errorString.includes('RCTBlobManager') || errorString.includes('attempt to insert nil object')) {
-        console.log('🚨 [MessageInput] RCTBlobManager error captured:', {
-          timestamp: new Date().toISOString(),
-          args: args,
-          currentImageUri: imageUri ? imageUri.substring(0, 50) + '...' : 'none',
-          currentImageFile: imageFile ? {
-            fileName: imageFile.fileName,
-            type: imageFile.type,
-            size: imageFile.fileSize
-          } : 'none',
-          uploading: uploading
-        });
-        
-        setBlobErrors(prev => [...prev, {
-          timestamp: Date.now(),
-          error: errorString,
-          context: {
-            hasImageUri: !!imageUri,
-            hasImageFile: !!imageFile,
-            uploading: uploading
-          }
-        }]);
-      }
-      originalConsoleError.apply(console, args);
-    };
-    
-    console.warn = (...args) => {
-      const warnString = args.join(' ');
-      if (warnString.includes('RCTBlobManager')) {
-        console.log('⚠️ [MessageInput] RCTBlobManager warning captured:', args);
-      }
-      originalConsoleWarn.apply(console, args);
-    };
-    
-    return () => {
-      console.error = originalConsoleError;
-      console.warn = originalConsoleWarn;
-    };
-  }, [imageUri, imageFile, uploading]);
 
   useEffect(() => {
     (async () => {
@@ -969,49 +302,29 @@ const MessageInput = () => {
       setHasPermission(status === 'granted');
     })();
     
-    // Uncomment to test DynamoDB connection
-    // testDynamoConnection();
-    
     return () => {
       mounted.current = false;
     };
   }, []);
 
   const handleImagePick = async () => {
-    console.log('📷 [handleImagePick] Starting image picker...');
+    console.log('📷 Starting image picker...');
     
     if (!hasPermission) {
-      console.error('❌ [handleImagePick] No permission');
       Alert.alert('Permission Required', 'Permission to access gallery is required!');
       return;
     }
 
     try {
-      console.log('🔍 [handleImagePick] Launching image library...');
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: false,
         quality: 1,
       });
 
-      console.log('📋 [handleImagePick] Picker result:', {
-        canceled: result.canceled,
-        assetsLength: result.assets?.length,
-        firstAsset: result.assets?.[0] ? {
-          uri: result.assets[0].uri?.substring(0, 50) + '...',
-          type: result.assets[0].type,
-          mimeType: result.assets[0].mimeType,
-          fileName: result.assets[0].fileName,
-          fileSize: result.assets[0].fileSize,
-          width: result.assets[0].width,
-          height: result.assets[0].height
-        } : null
-      });
-
       if (!result.canceled && result.assets && result.assets[0]) {
         const asset = result.assets[0];
         
-        // Validate the asset
         if (!asset.uri) {
           throw new Error('Asset URI is null');
         }
@@ -1020,51 +333,17 @@ const MessageInput = () => {
           throw new Error(`File too large: ${(asset.fileSize / (1024 * 1024)).toFixed(2)}MB`);
         }
         
-        console.log('✅ [handleImagePick] Asset validated, setting state...');
-        
         if (mounted.current) {
           setImageUri(asset.uri);
           setImageFile(asset);
           setDuplicateWarning('');
-          
-          // Immediately test the URI
-          console.log('🧪 [handleImagePick] Testing URI accessibility...');
-          try {
-            const testResponse = await fetch(asset.uri);
-            console.log('✅ [handleImagePick] URI is accessible:', {
-              status: testResponse.status,
-              contentType: testResponse.headers.get('content-type'),
-              contentLength: testResponse.headers.get('content-length')
-            });
-          } catch (testError) {
-            console.error('❌ [handleImagePick] URI test failed:', testError);
-            Alert.alert('Error', 'Selected image cannot be accessed');
-            return;
-          }
+          setDuplicateModalData(null);
         }
       }
     } catch (error) {
-      console.error('❌ [handleImagePick] Error:', {
-        message: error.message,
-        stack: error.stack,
-        name: error.name
-      });
+      console.error('Error picking image:', error);
       Alert.alert('Error', `Failed to pick image: ${error.message}`);
     }
-  };
-
-  const showBlobErrors = () => {
-    if (blobErrors.length === 0) {
-      Alert.alert('No Errors', 'No RCTBlobManager errors captured yet');
-      return;
-    }
-    
-    const errorSummary = blobErrors.map((err, i) => 
-      `${i + 1}. ${new Date(err.timestamp).toLocaleTimeString()}: ${err.error.substring(0, 100)}...`
-    ).join('\n\n');
-    
-    Alert.alert('Captured Blob Errors', errorSummary);
-    console.log('🚨 [showBlobErrors] All captured errors:', blobErrors);
   };
 
   const handleSend = async () => {
@@ -1076,26 +355,28 @@ const MessageInput = () => {
     let warningMessage = '';
     
     if (imageUri) {
-      console.log('🖼️ About to upload image...');
+      console.log('🖼️ Processing image upload...');
       setDuplicateWarning('');
       setUploading(true);
       
       try {
         if (!currentUser || !currentUser.uid) {
-          console.error('❌ Authentication error: No current user');
           Alert.alert('Authentication Error', 'Please sign in again');
           return;
         }
-        // S3 upload logic
-        const uploadResult = await handleS3Upload(imageUri, imageFile, currentUser);
-        console.log('📬 [handleSend] Raw upload result:', uploadResult);
+        
+        // Use AWS upload with duplicate detection
+        const uploadResult = await handleAWSUpload(imageUri, imageFile, currentUser);
+        
         if (uploadResult.blocked) {
+          // Show duplicate modal
           setDuplicateModalData({
             totalCount: uploadResult.totalCount,
-            isExact: false,
-            detectionMethod: 's3_count',
-            allUploads: [],
+            uploadCount: uploadResult.uploadCount,
+            similarImages: uploadResult.similarImages,
+            allUploads: formatUploadHistory(uploadResult.similarImages, uploadResult.uploadCount),
             fileHash: uploadResult.imageHash,
+            perceptualHash: uploadResult.perceptualHash,
             canProceed: false
           });
           setShowDuplicateModal(true);
@@ -1104,61 +385,47 @@ const MessageInput = () => {
           setImageFile(null);
           return;
         }
+        
         imageUrl = uploadResult.imageUrl;
         imageHash = uploadResult.imageHash;
         imageTag = uploadResult.imageTag;
         warningMessage = uploadResult.warningMessage;
         
-        console.log('📋 [handleSend] Upload result processed:', {
-          finalImageUrl: imageUrl,
-          finalImageHash: imageHash,
-          finalImageTag: imageTag,
-          finalWarningMessage: warningMessage,
-          isBlocked: uploadResult.blocked,
-        });
+        // Show warning if needed
+        if (uploadResult.totalCount === 2) {
+          setDuplicateWarning('⚠️ WARNING: This image has been uploaded twice. One more upload will reach the limit.');
+        }
+        
       } catch (err) {
-        console.error('❌ [handleSend] Upload error:', err);
+        console.error('Upload error:', err);
         Alert.alert('Upload Failed', `Image upload failed: ${err.message || 'Unknown error'}`);
         setUploading(false);
         return;
       }
+      
       setUploading(false);
     }
     
-    // *** IMPORTANT: Only send message if we have a valid upload (or text-only message) ***
-    // Send message if: no image OR (has image AND upload succeeded with valid URL)
-    console.log('🔍 [handleSend] Checking send condition:', {
-      hasImageUri: !!imageUri,
-      hasImageUrl: !!imageUrl,
-      imageTag,
-      condition: !imageUri || imageUrl
-    });
-    
+    // Send message if we have a valid upload or text-only message
     if (!imageUri || imageUrl) {
       try {
-        console.log('📤 Sending message...');
-        const messagePayload = {
-          senderUid: currentUser.uid,
-          senderDisplayName: currentUser.displayName,
-          senderPhotoURL: currentUser.photoURL,
-          recipientDisplayName: data.user?.displayName,
-          recipientPhotoURL: data.user?.photoURL,
-          text: text || (imageUri ? `[Image: ${imageFile?.fileName || 'image.jpg'}]` : ''),
-          type: imageUri ? 'image' : 'text',
-          imageUrl,
-          imageHash,
-          imageTag,
-          createdAt: new Date(),
-        };
-
-        console.log('📦 [handleSend] Payload to be sent:', messagePayload);
-
         await messageService.sendMessage(
           data.chatId,
-          messagePayload,
+          {
+            senderUid: currentUser.uid,
+            senderDisplayName: currentUser.displayName,
+            senderPhotoURL: currentUser.photoURL,
+            recipientDisplayName: data.user?.displayName,
+            recipientPhotoURL: data.user?.photoURL,
+            text: text || (imageUri ? `[Image: ${imageFile?.fileName || 'image.jpg'}]` : ''),
+            type: imageUri ? 'image' : 'text',
+            imageUrl,
+            imageHash,
+            imageTag,
+            createdAt: new Date(),
+          },
           data.user?.uid
         );
-        console.log('✅ Message sent successfully');
         
         if (mounted.current) {
           setText('');
@@ -1169,17 +436,8 @@ const MessageInput = () => {
           setShowDuplicateModal(false);
         }
       } catch (error) {
-        console.error('❌ Message send error:', error);
+        console.error('Message send error:', error);
         Alert.alert('Send Failed', 'Failed to send message. Please try again.');
-      }
-    } else {
-      console.log('🚫 Message not sent - image was blocked or failed to upload');
-      // Clean up UI state
-      if (mounted.current) {
-        setText('');
-        setImageUri(null);
-        setImageFile(null);
-        setDuplicateWarning('');
       }
     }
   };
@@ -1195,14 +453,13 @@ const MessageInput = () => {
   const renderDuplicateModal = () => {
     if (!duplicateModalData) return null;
     
-    const isBlocked = duplicateModalData.totalCount >= 3;  // Changed from >= 2
-    const isWarning = duplicateModalData.totalCount === 2;  // Changed from === 1
+    const isBlocked = duplicateModalData.totalCount >= 3;
+    const isWarning = duplicateModalData.totalCount === 2;
     
-    // Calculate timing information
     const firstUpload = duplicateModalData.allUploads?.[0];
     const lastUpload = duplicateModalData.allUploads?.[duplicateModalData.allUploads.length - 1];
-    const timeSinceFirstUpload = firstUpload ? new Date().getTime() - firstUpload.timestamp : 0;
-    const timeSinceLastUpload = lastUpload ? new Date().getTime() - lastUpload.timestamp : 0;
+    const timeSinceFirstUpload = firstUpload ? Date.now() - new Date(firstUpload.timestamp).getTime() : 0;
+    const timeSinceLastUpload = lastUpload ? Date.now() - new Date(lastUpload.timestamp).getTime() : 0;
     
     const formatTimeAgo = (ms) => {
       const seconds = Math.floor(ms / 1000);
@@ -1240,10 +497,12 @@ const MessageInput = () => {
                 This image has been uploaded {duplicateModalData.totalCount} times across all devices.
               </Text>
               
-              {duplicateModalData.detectionMethod === 'similarity_group' && (
+              {duplicateModalData.similarImages && duplicateModalData.similarImages.length > 0 && (
                 <View style={styles.detectionInfo}>
                   <Text style={styles.detectionLabel}>Detection Type:</Text>
-                  <Text style={styles.detectionValue}>Cross-device similarity match</Text>
+                  <Text style={styles.detectionValue}>
+                    Cross-device similarity match ({duplicateModalData.similarImages.length} similar images found)
+                  </Text>
                 </View>
               )}
               
@@ -1251,11 +510,11 @@ const MessageInput = () => {
                 <Text style={styles.historyTitle}>Upload History:</Text>
                 {duplicateModalData.allUploads?.slice(-5).map((upload, index) => (
                   <View key={index} style={styles.historyItem}>
-                    <Text style={styles.historyUser}>{upload.userName || 'Anonymous'}</Text>
+                    <Text style={styles.historyUser}>{upload.userId || 'Anonymous'}</Text>
                     <Text style={styles.historyTime}>
                       {new Date(upload.timestamp).toLocaleString()}
-                      {index === duplicateModalData.allUploads.length - 1 && (
-                        <Text style={styles.timeAgo}> ({formatTimeAgo(timeSinceLastUpload)})</Text>
+                      {upload.distance !== undefined && (
+                        <Text style={styles.distanceInfo}> (similarity: {upload.distance})</Text>
                       )}
                     </Text>
                   </View>
@@ -1286,41 +545,17 @@ const MessageInput = () => {
             </ScrollView>
             
             <View style={styles.modalActions}>
-              {isBlocked ? (
-                <TouchableOpacity
-                  style={[styles.modalButton, styles.modalButtonCancel]}
-                  onPress={() => {
-                    setShowDuplicateModal(false);
-                    removeImage();
-                  }}
-                >
-                  <Text style={styles.modalButtonText}>Remove Image</Text>
-                </TouchableOpacity>
-              ) : (
-                <>
-                  <TouchableOpacity
-                    style={[styles.modalButton, styles.modalButtonCancel]}
-                    onPress={() => {
-                      setShowDuplicateModal(false);
-                      removeImage();
-                    }}
-                  >
-                    <Text style={styles.modalButtonText}>Cancel</Text>
-                  </TouchableOpacity>
-                  
-                  <TouchableOpacity
-                    style={[styles.modalButton, styles.modalButtonProceed]}
-                    onPress={() => {
-                      setShowDuplicateModal(false);
-                      // Proceed with sending
-                    }}
-                  >
-                    <Text style={[styles.modalButtonText, styles.modalButtonTextProceed]}>
-                      Upload Anyway
-                    </Text>
-                  </TouchableOpacity>
-                </>
-              )}
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonCancel]}
+                onPress={() => {
+                  setShowDuplicateModal(false);
+                  removeImage();
+                }}
+              >
+                <Text style={styles.modalButtonText}>
+                  {isBlocked ? 'Remove Image' : 'Cancel'}
+                </Text>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -1355,8 +590,7 @@ const MessageInput = () => {
         <TouchableOpacity
           style={[
             styles.sendButton,
-            uploading && styles.disabledButton,
-            duplicateModalData?.totalCount >= 3 && imageUri && styles.blockedButton
+            uploading && styles.disabledButton
           ]}
           disabled={Boolean(uploading) || Boolean(!text.trim() && !imageUri)}
           onPress={handleSend}
@@ -1372,16 +606,6 @@ const MessageInput = () => {
             <Text style={styles.imageFileName}>
               {imageFile?.fileName || 'image.jpg'}
             </Text>
-            {duplicateModalData && (
-              <View style={styles.uploadCountContainer}>
-                <Text style={[
-                  styles.uploadCount,
-                  duplicateModalData.totalCount >= 3 && styles.uploadCountBlocked
-                ]}>
-                  {duplicateModalData.totalCount}/3 uploads
-                </Text>
-              </View>
-            )}
           </View>
           <TouchableOpacity style={styles.removeImageButton} onPress={removeImage}>
             <Ionicons name="close-circle" size={24} color="#FF3B30" />
@@ -1389,11 +613,11 @@ const MessageInput = () => {
         </View>
       )}
 
-      {duplicateWarning ? (
+      {duplicateWarning && (
         <View style={styles.warningContainer}>
           <Text style={styles.warningText}>{duplicateWarning}</Text>
         </View>
-      ) : null}
+      )}
 
       {renderDuplicateModal()}
     </View>
@@ -1438,9 +662,6 @@ const styles = StyleSheet.create({
   disabledButton: {
     opacity: 0.5,
   },
-  blockedButton: {
-    backgroundColor: '#e53e3e',
-  },
   imagePreviewContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1469,23 +690,12 @@ const styles = StyleSheet.create({
   removeImageButton: {
     padding: 8,
   },
-  uploadCountContainer: {
-    marginTop: 4,
-  },
-  uploadCount: {
-    color: '#ff9800',
-    fontSize: 12,
-    marginTop: 2,
-    fontWeight: '600',
-  },
-  uploadCountBlocked: {
-    color: '#e53e3e',
-  },
   warningContainer: {
     paddingHorizontal: 12,
     paddingBottom: 8,
   },
   warningText: {
+    color: '#ff9800',
     fontWeight: '600',
     fontSize: 14,
   },
@@ -1562,8 +772,6 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   historyItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
     paddingVertical: 4,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
@@ -1575,6 +783,11 @@ const styles = StyleSheet.create({
   historyTime: {
     fontSize: 11,
     color: '#666',
+  },
+  distanceInfo: {
+    fontSize: 10,
+    color: '#999',
+    fontStyle: 'italic',
   },
   limitInfo: {
     marginTop: 16,
@@ -1615,21 +828,10 @@ const styles = StyleSheet.create({
   modalButtonCancel: {
     backgroundColor: '#e0e0e0',
   },
-  modalButtonProceed: {
-    backgroundColor: '#667eea',
-  },
   modalButtonText: {
     fontSize: 16,
     fontWeight: '600',
     color: '#333',
-  },
-  modalButtonTextProceed: {
-    color: '#fff',
-  },
-  timeAgo: {
-    color: '#666',
-    fontSize: 11,
-    marginLeft: 4,
   },
   firstUploadInfo: {
     marginTop: 8,
