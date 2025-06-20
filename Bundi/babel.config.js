@@ -5,8 +5,6 @@ module.exports = function(api) {
       plugins: [
         '@babel/plugin-transform-class-static-block',
         'expo-router/babel',
-        'react-native-reanimated/plugin',
       ],
     };
-  }; 
-  
+  };

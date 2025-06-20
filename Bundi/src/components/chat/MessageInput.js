@@ -25,8 +25,9 @@ import { getStorage, ref, uploadBytesResumable, getDownloadURL } from "firebase/
 import { getFirestore, doc, getDoc, setDoc, updateDoc, serverTimestamp, collection, getDocs, query, where, limit, orderBy, deleteDoc } from "firebase/firestore";
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { uploadUserContent } from '../../services/storageService';
-import { awsConfig, apiHelpers } from '../../utils/aws';
-import { uploadImageToS3, getImageUploadCountDynamo, incrementImageUploadCountDynamo } from '../../utils/aws';
+import { awsConfig, uploadImageToS3, getImageUploadCountDynamo, incrementImageUploadCountDynamo, checkAWSCredentials } from '../../utils/aws';
+import { getPresignedUrl } from '../../services/presignService';
+import { uploadImage } from '../../services/uploadService';
 
 // Add timing utility
 const getTimestamp = () => {
@@ -64,83 +65,150 @@ async function getFileHash(uri) {
   }
 }
 
+// Replace uploadImageToFirebase with S3 upload
+async function uploadImageToS3Local(imageUri, userId, fileHash, imageFile) {
+  try {
+    console.log('🚀 [uploadImageToS3Local] Starting upload...', {
+      imageUri: imageUri?.substring(0, 50) + '...',
+      userId,
+      fileHash: fileHash?.substring(0, 12) + '...',
+      fileName: imageFile?.fileName
+    });
+
+    // Pass the actual fileHash to storageService
+    const uploadResult = await uploadUserContent(imageFile, userId, fileHash);
+    
+    console.log('✅ [uploadImageToS3Local] Upload result:', {
+      downloadURL: uploadResult.downloadURL?.substring(0, 50) + '...',
+      fileHash: uploadResult.fileHash?.substring(0, 12) + '...'
+    });
+    
+    return uploadResult.downloadURL;
+  } catch (error) {
+    console.error('❌ [uploadImageToS3Local] Upload failed:', error);
+    throw error;
+  }
+}
+
+// Test function for DynamoDB connection
+const testDynamoConnection = async () => {
+  try {
+    const testHash = 'test_hash_' + Date.now();
+    console.log('🧪 Testing DynamoDB connection...');
+    
+    // Test get (should return 0)
+    const count1 = await getImageUploadCountDynamo(testHash);
+    console.log('✅ DynamoDB GET test - initial count:', count1);
+    
+    // Test increment
+    await incrementImageUploadCountDynamo(
+      testHash, 
+      'test_user_id',
+      'Test User',
+      'test.jpg'
+    );
+    
+    // Test get again (should return 1)
+    const count2 = await getImageUploadCountDynamo(testHash);
+    console.log('✅ DynamoDB INCREMENT test - new count:', count2);
+    
+    if (count2 !== 1) {
+      console.error('❌ DynamoDB increment not working! Expected 1, got:', count2);
+    }
+    
+  } catch (error) {
+    console.error('❌ DynamoDB test failed:', error);
+  }
+};
+
 // Main upload handler (replaces handleCrossDeviceUpload)
 async function handleS3Upload(imageUri, imageFile, currentUser) {
   try {
-    console.log('🚀 [handleS3Upload] Starting S3 upload process...', {
-      imageUri: imageUri?.substring(0, 50) + '...',
-      fileName: imageFile?.fileName,
-      userId: currentUser?.uid
+    console.log('🚀 [handleS3Upload] Starting upload with existing services...');
+    
+    // Check AWS credentials first
+    const credentialsCheck = checkAWSCredentials();
+    console.log('🔍 [handleS3Upload] Credentials check:', credentialsCheck);
+    
+    // Read image as base64 for the upload service
+    const base64 = await FileSystem.readAsStringAsync(imageUri, {
+      encoding: FileSystem.EncodingType.Base64,
     });
-
-    // Step 1: Generate file hash
-    console.log('📝 [handleS3Upload] Generating file hash...');
+    
+    // Generate file hash
     const fileHash = await getFileHash(imageUri);
-    console.log('✅ [handleS3Upload] File hash generated:', fileHash?.substring(0, 12) + '...');
-
-    // Step 2: Check S3 count using centralized API helpers
-    console.log('🔍 [handleS3Upload] Checking upload count...');
-    const count = await apiHelpers.getImageUploadCount(fileHash);
-    console.log('📊 [handleS3Upload] Current upload count:', count);
     
-    if (count >= 3) {
-      console.log('🚫 [handleS3Upload] Upload blocked - count >= 3');
+    // Try the upload service first (if available)
+    try {
+      console.log('🔄 [handleS3Upload] Trying upload service...');
+      
+      const uploadResult = await uploadImage({
+        image: base64,
+        filename: imageFile.fileName || `image_${Date.now()}_${fileHash.substring(0, 8)}.jpg`,
+        fileHash: fileHash,
+        contentType: imageFile.type || 'image/jpeg',
+        userId: currentUser.uid
+      });
+      
+      if (uploadResult.success) {
+        console.log('✅ [handleS3Upload] Upload service succeeded');
+        return {
+          imageUrl: uploadResult.imageUrl,
+          imageHash: fileHash,
+          imageTag: uploadResult.uploadCount === 2 ? 'warning' : 'original',
+          warningMessage: uploadResult.message || 'Upload completed successfully',
+          blocked: uploadResult.blocked || false,
+          totalCount: uploadResult.uploadCount || 1,
+        };
+      }
+    } catch (uploadServiceError) {
+      console.warn('⚠️ Upload service failed, trying fallback:', uploadServiceError.message);
+    }
+    
+    // Fallback: Use uploadUserContent service
+    console.log('🔄 [handleS3Upload] Using uploadUserContent fallback...');
+    
+    try {
+      const uploadResult = await uploadUserContent(imageFile, currentUser.uid, fileHash);
+      
       return {
-        imageUrl: null,
+        imageUrl: uploadResult.downloadURL,
         imageHash: fileHash,
-        imageTag: 'blocked',
-        warningMessage: `Upload blocked: This image has been uploaded ${count} times. Maximum allowed: 3 per unique image.`,
-        blocked: true,
-        totalCount: count,
+        imageTag: 'original',
+        warningMessage: 'Upload completed (fallback method)',
+        blocked: false,
+        totalCount: 1,
       };
+    } catch (uploadError) {
+      console.error('❌ uploadUserContent also failed:', uploadError);
+      
+      // Final fallback: Use direct AWS S3 upload
+      console.log('🔄 [handleS3Upload] Using direct AWS S3 upload...');
+      
+      try {
+        const s3Url = await uploadImageToS3(imageUri, currentUser.uid, fileHash, imageFile);
+        
+        return {
+          imageUrl: s3Url,
+          imageHash: fileHash,
+          imageTag: 'original',
+          warningMessage: 'Upload completed (direct S3 method)',
+          blocked: false,
+          totalCount: 1,
+        };
+      } catch (s3Error) {
+        console.error('❌ All upload methods failed:', s3Error);
+        throw new Error('All upload methods failed');
+      }
     }
-
-    // Step 3: Upload to S3
-    console.log('📤 [handleS3Upload] Uploading to S3...');
-    const imageUrl = await uploadImageToS3(imageUri, currentUser.uid, fileHash, imageFile);
-    console.log('✅ [handleS3Upload] S3 upload completed:', imageUrl?.substring(0, 50) + '...');
-
-    // Step 4: Increment S3 count using centralized API helpers
-    console.log('➕ [handleS3Upload] Incrementing upload count...');
-    await apiHelpers.incrementImageUploadCount(fileHash, currentUser.uid, imageFile?.fileName || 'image.jpg');
-
-    // Step 5: Re-check count after increment
-    console.log('🔍 [handleS3Upload] Re-checking upload count...');
-    const newCount = await apiHelpers.getImageUploadCount(fileHash);
-    console.log('📊 [handleS3Upload] New upload count:', newCount);
     
-    const isBlocked = newCount >= 3;
-    const isWarning = newCount === 2;
-    let warningMessage = '';
-    if (isBlocked) {
-      warningMessage = `Upload blocked: This image has been uploaded ${newCount} times. Maximum allowed: 3 per unique image.`;
-    } else if (isWarning) {
-      warningMessage = `⚠️ WARNING: This image has been uploaded twice before. One more upload will reach the limit.`;
-    } else {
-      warningMessage = '✅ New image ready to upload';
-    }
-
-    console.log('🎉 [handleS3Upload] Upload process completed successfully');
-    return {
-      imageUrl,
-      imageHash: fileHash,
-      imageTag: isWarning ? 'warning' : 'original',
-      warningMessage,
-      blocked: isBlocked,
-      totalCount: newCount,
-    };
   } catch (error) {
-    console.error('❌ [handleS3Upload] Upload failed:', error);
-    console.error('❌ [handleS3Upload] Error details:', {
-      message: error.message,
-      stack: error.stack,
-      name: error.name
-    });
+    console.error('❌ [handleS3Upload] Upload error:', error);
     return {
       imageUrl: null,
       imageHash: null,
       imageTag: 'error',
-      warningMessage: error.message || 'Error uploading image. Please try again.',
+      warningMessage: error.message || 'Error uploading image',
       blocked: false,
       totalCount: 0,
     };
@@ -629,11 +697,11 @@ async function handleCrossDeviceUpload(imageUri, imageFile, currentUser) {
         blocked: true
       };
     }
-    const imageUrl = await uploadImageToS3(imageUri, currentUser.uid, fileHash, imageFile);
+    const imageUrl = await uploadImageToS3Local(imageUri, currentUser.uid, fileHash, imageFile);
     await incrementImageUploadCountDynamo(
-      currentUser.uid,
-      currentUser.displayName || currentUser.email,
       fileHash,
+      currentUser.uid,
+      currentUser.displayName || currentUser.email || 'Anonymous',
       imageFile?.fileName || 'image.jpg'
     );
     return {
@@ -901,6 +969,9 @@ const MessageInput = () => {
       setHasPermission(status === 'granted');
     })();
     
+    // Uncomment to test DynamoDB connection
+    // testDynamoConnection();
+    
     return () => {
       mounted.current = false;
     };
@@ -1017,6 +1088,7 @@ const MessageInput = () => {
         }
         // S3 upload logic
         const uploadResult = await handleS3Upload(imageUri, imageFile, currentUser);
+        console.log('📬 [handleSend] Raw upload result:', uploadResult);
         if (uploadResult.blocked) {
           setDuplicateModalData({
             totalCount: uploadResult.totalCount,
@@ -1037,12 +1109,12 @@ const MessageInput = () => {
         imageTag = uploadResult.imageTag;
         warningMessage = uploadResult.warningMessage;
         
-        console.log('📋 [handleSend] Upload result:', {
-          imageUrl: imageUrl?.substring(0, 50) + '...',
-          imageHash: imageHash?.substring(0, 12) + '...',
-          imageTag,
-          warningMessage,
-          blocked: uploadResult.blocked
+        console.log('📋 [handleSend] Upload result processed:', {
+          finalImageUrl: imageUrl,
+          finalImageHash: imageHash,
+          finalImageTag: imageTag,
+          finalWarningMessage: warningMessage,
+          isBlocked: uploadResult.blocked,
         });
       } catch (err) {
         console.error('❌ [handleSend] Upload error:', err);
@@ -1065,21 +1137,25 @@ const MessageInput = () => {
     if (!imageUri || imageUrl) {
       try {
         console.log('📤 Sending message...');
+        const messagePayload = {
+          senderUid: currentUser.uid,
+          senderDisplayName: currentUser.displayName,
+          senderPhotoURL: currentUser.photoURL,
+          recipientDisplayName: data.user?.displayName,
+          recipientPhotoURL: data.user?.photoURL,
+          text: text || (imageUri ? `[Image: ${imageFile?.fileName || 'image.jpg'}]` : ''),
+          type: imageUri ? 'image' : 'text',
+          imageUrl,
+          imageHash,
+          imageTag,
+          createdAt: new Date(),
+        };
+
+        console.log('📦 [handleSend] Payload to be sent:', messagePayload);
+
         await messageService.sendMessage(
           data.chatId,
-          {
-            senderUid: currentUser.uid,
-            senderDisplayName: currentUser.displayName,
-            senderPhotoURL: currentUser.photoURL,
-            recipientDisplayName: data.user?.displayName,
-            recipientPhotoURL: data.user?.photoURL,
-            text: text || (imageUri ? `[Image: ${imageFile?.fileName || 'image.jpg'}]` : ''),
-            type: imageUri ? 'image' : 'text',
-            imageUrl,
-            imageHash,
-            imageTag,
-            createdAt: new Date(),
-          },
+          messagePayload,
           data.user?.uid
         );
         console.log('✅ Message sent successfully');

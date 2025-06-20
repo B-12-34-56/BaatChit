@@ -8,10 +8,11 @@
 const { S3Client, PutBucketCorsCommand, PutBucketPolicyCommand, GetBucketPolicyCommand } = require('@aws-sdk/client-s3');
 const fs = require('fs');
 const path = require('path');
+const AWS = require('aws-sdk');
 
 // AWS Configuration from your setup
 const AWS_CONFIG = {
-  bucket: '2314823894myawsbucket',
+  bucket: process.env.AWS_S3_BUCKET,
   region: 'us-east-1',
   accessKeyId: process.env.AWS_ACCESS_KEY_ID,
   secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,

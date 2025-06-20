@@ -8,6 +8,10 @@ module.exports = {
   resolver: {
     ...config.resolver,
     sourceExts: [...config.resolver.sourceExts, 'mjs', 'cjs'],
-    unstable_enablePackageExports: false
+    unstable_enablePackageExports: false,
+    extraNodeModules: {
+      ...config.resolver.extraNodeModules,
+      buffer: require.resolve("buffer/"),
+    },
   },
 }; 

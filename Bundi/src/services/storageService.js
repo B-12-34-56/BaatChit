@@ -47,22 +47,43 @@ export const uploadImageToFirebase = async (fileUri, folder = 'images') => {
 };
 
 // Add a new function for user content uploads (used by MessageInput)
-export const uploadUserContent = async (imageFile, userId) => {
+export const uploadUserContent = async (imageFile, userId, providedFileHash = null) => {
   try {
-    // Generate file hash for duplicate checking
-    const timestamp = Date.now();
-    const fileHash = `user_${userId}_${timestamp}_${Math.random().toString(36).substring(7)}`;
+    console.log('🚀 [uploadUserContent] Starting upload...', {
+      fileName: imageFile?.fileName || imageFile?.name,
+      uri: imageFile?.uri?.substring(0, 50) + '...',
+      userId,
+      providedFileHash: providedFileHash?.substring(0, 12) + '...'
+    });
     
-    // Use AWS S3 upload helper
-    const s3Url = await uploadImageToS3(imageFile.uri, userId, fileHash, imageFile);
+    // Use provided hash or generate one
+    const fileHash = providedFileHash || `user_${userId}_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    
+    // Use AWS S3 upload helper with the proper parameters
+    const s3Url = await uploadImageToS3(
+      imageFile.uri, 
+      userId, 
+      fileHash, 
+      {
+        type: imageFile.type || 'image/jpeg',
+        fileName: imageFile.fileName || imageFile.name || `image_${Date.now()}.jpg`,
+        size: imageFile.size || 0
+      }
+    );
+    
+    console.log('✅ [uploadUserContent] Upload successful:', {
+      downloadURL: s3Url?.substring(0, 50) + '...',
+      fileHash: fileHash?.substring(0, 12) + '...'
+    });
     
     return {
       downloadURL: s3Url,
       fileHash: fileHash,
+      uploadPath: `images/${userId}_${Date.now()}.jpg`,
       success: true
     };
   } catch (error) {
-    console.error('Error uploading user content to S3:', error);
+    console.error('❌ [uploadUserContent] Error:', error);
     throw error;
   }
 }; 

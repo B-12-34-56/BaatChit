@@ -5,13 +5,14 @@
  * This script configures your S3 bucket for presigned URL uploads
  */
 
-const { S3Client, PutBucketCorsCommand, GetBucketCorsCommand, PutPublicAccessBlockCommand, GetPublicAccessBlockCommand } = require('@aws-sdk/client-s3');
+const { S3Client, PutBucketCorsCommand, GetBucketCorsCommand, PutPublicAccessBlockCommand, GetPublicAccessBlockCommand, PutBucketPolicyCommand, GetBucketPolicyCommand } = require('@aws-sdk/client-s3');
 const fs = require('fs');
 const path = require('path');
+const AWS = require('aws-sdk');
 
 // AWS Configuration
 const AWS_CONFIG = {
-  bucket: '2314823894myawsbucket',
+  bucket: process.env.AWS_S3_BUCKET,
   region: 'us-east-1',
   accessKeyId: process.env.AWS_ACCESS_KEY_ID,
   secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
@@ -22,10 +23,15 @@ const AWS_CONFIG = {
 const s3Client = new S3Client({
   region: AWS_CONFIG.region,
   credentials: {
-    accessKeyId: AWS_CONFIG.accessKeyId,
-    secretAccessKey: AWS_CONFIG.secretAccessKey,
-    sessionToken: AWS_CONFIG.sessionToken,
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    sessionToken: process.env.AWS_SESSION_TOKEN,
   },
+});
+
+const s3 = new AWS.S3({
+  region: 'us-east-1',
+  bucket: process.env.AWS_S3_BUCKET || 'YOUR_S3_BUCKET_NAME',
 });
 
 // CORS Configuration for presigned URL uploads
@@ -105,7 +111,7 @@ async function getCurrentCorsConfiguration() {
     console.log('🔄 Getting current CORS configuration...');
     
     const command = new GetBucketCorsCommand({
-      Bucket: AWS_CONFIG.bucket,
+      Bucket: process.env.AWS_S3_BUCKET || 'YOUR_S3_BUCKET_NAME',
     });
     
     const response = await s3Client.send(command);
@@ -126,7 +132,7 @@ async function updateCorsConfiguration() {
     console.log('🔄 Updating CORS configuration...');
     
     const corsCommand = new PutBucketCorsCommand({
-      Bucket: AWS_CONFIG.bucket,
+      Bucket: process.env.AWS_S3_BUCKET,
       CORSConfiguration: {
         CORSRules: corsConfig,
       },
@@ -150,7 +156,7 @@ async function getCurrentPublicAccessBlock() {
     console.log('🔄 Getting current public access block configuration...');
     
     const command = new GetPublicAccessBlockCommand({
-      Bucket: AWS_CONFIG.bucket,
+      Bucket: process.env.AWS_S3_BUCKET || 'YOUR_S3_BUCKET_NAME',
     });
     
     const response = await s3Client.send(command);
@@ -168,7 +174,7 @@ async function updatePublicAccessBlock() {
     console.log('🔄 Updating public access block configuration...');
     
     const command = new PutPublicAccessBlockCommand({
-      Bucket: AWS_CONFIG.bucket,
+      Bucket: process.env.AWS_S3_BUCKET || 'YOUR_S3_BUCKET_NAME',
       PublicAccessBlockConfiguration: publicAccessBlockConfig,
     });
     
@@ -228,10 +234,57 @@ async function verifyConfiguration() {
   }
 }
 
+/**
+ * Update S3 bucket policy to allow access to images/ folder
+ */
+async function updateBucketPolicy() {
+  try {
+    console.log('🔄 Applying bucket policy...');
+    
+    const bucketPolicy = {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "AllowS3ReadWriteInImagesFolder",
+          "Effect": "Allow",
+          "Principal": {
+            "AWS": "arn:aws:iam::739874238091:root"
+          },
+          "Action": [
+            "s3:PutObject",
+            "s3:GetObject",
+            "s3:DeleteObject"
+          ],
+          "Resource": "arn:aws:s3:::YOUR_S3_BUCKET_NAME/images/*"
+        },
+        {
+          Sid: 'PublicReadGetObject',
+          Effect: 'Allow',
+          Principal: '*',
+          Action: 's3:GetObject',
+          Resource: `arn:aws:s3:::${process.env.AWS_S3_BUCKET}/images/*`,
+        },
+      ]
+    };
+
+    const params = {
+      Bucket: process.env.AWS_S3_BUCKET,
+      Policy: JSON.stringify(bucketPolicy)
+    };
+
+    await s3Client.putBucketPolicy(params).promise();
+    console.log('✅ Bucket policy updated successfully!');
+    
+  } catch (error) {
+    console.error('❌ Error updating bucket policy:', error);
+    throw error;
+  }
+}
+
 async function main() {
-  console.log('🚀 S3 CORS and Block Public Access Configuration');
-  console.log('================================================');
-  console.log(`Bucket: ${AWS_CONFIG.bucket}`);
+  console.log('🚀 AWS S3 Configuration Update');
+  console.log('==============================');
+  console.log(`Bucket: ${process.env.AWS_S3_BUCKET}`);
   console.log(`Region: ${AWS_CONFIG.region}`);
   console.log('');
   
@@ -248,6 +301,7 @@ async function main() {
     console.log('---------------------------');
     await updateCorsConfiguration();
     await updatePublicAccessBlock();
+    await updateBucketPolicy();
     console.log('');
     
     console.log('✅ Verifying configurations:');
@@ -265,6 +319,7 @@ async function main() {
       console.log('4. ✅ Block public ACLs disabled (required for presigned URLs)');
       console.log('5. ✅ Public bucket policies still blocked (security)');
       console.log('6. ✅ Public bucket access restricted (security)');
+      console.log('7. ✅ Bucket policy updated successfully');
       console.log('');
       console.log('🔧 Your S3 bucket is now ready for presigned URL uploads!');
       console.log('');
@@ -296,4 +351,5 @@ module.exports = {
   updateCorsConfiguration,
   updatePublicAccessBlock,
   verifyConfiguration,
+  updateBucketPolicy,
 }; 

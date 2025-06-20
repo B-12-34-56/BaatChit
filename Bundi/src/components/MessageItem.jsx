@@ -37,7 +37,10 @@ const MessageItem = ({ message, isOwnMessage }) => {
                 source={{ uri: message.imageUrl }}
                 style={styles.messageImage}
                 resizeMode="cover"
-                onError={(e) => console.error('Image loading error:', e.nativeEvent.error)}
+                onError={(e) => console.error('Image loading error in MessageItem.jsx:', { 
+                  uri: message.imageUrl,
+                  errorMessage: e.nativeEvent.error 
+                })}
                 // Prevent image from being draggable/clickable as a link
                 draggable={false}
               />

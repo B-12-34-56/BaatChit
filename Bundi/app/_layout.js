@@ -1,4 +1,8 @@
 import 'react-native-gesture-handler';
+import 'react-native-get-random-values';
+import { Buffer } from 'buffer';
+if (typeof global.Buffer === 'undefined') global.Buffer = Buffer;
+
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth } from '../src/utils/firebase';

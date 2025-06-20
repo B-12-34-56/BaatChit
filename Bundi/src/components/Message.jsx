@@ -101,8 +101,15 @@ const Message = ({ message }) => {
                     width: 220, 
                     height: 150,
                     borderRadius: 10,
+                    backgroundColor: '#e0e0e0',
                   }}
                   contentFit="cover"
+                  onError={(error) => {
+                    console.log('Image load error in Message.jsx:', {
+                      uri: message.imageUrl,
+                      errorMessage: error?.error,
+                    });
+                  }}
                 />
               </TouchableOpacity>
               {message.imageTag && (

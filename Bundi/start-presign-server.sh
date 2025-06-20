@@ -4,12 +4,12 @@
 echo "🚀 Starting Presign Server for Bundi..."
 
 # Set environment variables for the presign server
-export AWS_BUCKET="2314823894myawsbucket"
-export AWS_REGION="us-east-1"
-export AWS_ACCESS_KEY_ID="ASIA2YQ7Q52F5Z77ZWA4"
-export AWS_SECRET_ACCESS_KEY="BlVMTyiVfWNlhpMN9S7IvJwG/DQ+9FF+s5ZEVut7"
-export AWS_SESSION_TOKEN=""
-export S3_SUBFOLDER="images/"
+export AWS_BUCKET=process.env.AWS_S3_BUCKET
+export AWS_REGION=process.env.AWS_REGION
+export AWS_ACCESS_KEY_ID=process.env.AWS_ACCESS_KEY_ID
+export AWS_SECRET_ACCESS_KEY=process.env.AWS_SECRET_ACCESS_KEY
+export AWS_SESSION_TOKEN=process.env.AWS_SESSION_TOKEN
+export S3_SUBFOLDER=process.env.S3_SUBFOLDER
 
 echo "📋 Configuration:"
 echo "  Bucket: $AWS_BUCKET"

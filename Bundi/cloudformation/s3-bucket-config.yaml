@@ -4,8 +4,8 @@ Description: 'S3 Bucket Configuration for Presigned URL Uploads'
 Parameters:
   BucketName:
     Type: String
-    Default: '2314823894myawsbucket'
-    Description: 'Name of the S3 bucket'
+    Description: 'S3 bucket name for image uploads'
+    Default: 'process.env.AWS_S3_BUCKET'
   
   Environment:
     Type: String

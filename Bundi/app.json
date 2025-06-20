@@ -64,7 +64,9 @@
       "router": {},
       "eas": {
         "projectId": "4dbc1c92-1eb4-43ce-baa2-4542d002b8ae"
-      }
+      },
+      "uploadApiUrl": "YOUR_UPLOAD_API_URL",
+      "presignApiUrl": "http://localhost:4000"
     }
   }
 }

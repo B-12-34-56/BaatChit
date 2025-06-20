@@ -2,15 +2,15 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: 'IAM Policies for Presigned URL Upload System'
 
 Parameters:
-  BucketName:
+  S3BucketName:
     Type: String
-    Default: '2314823894myawsbucket'
-    Description: 'Name of the S3 bucket'
+    Description: 'S3 bucket name for image uploads'
+    Default: 'process.env.AWS_S3_BUCKET'
   
   DynamoDBTableName:
     Type: String
-    Default: 'ImageSignatures'
-    Description: 'Name of the DynamoDB table for upload tracking'
+    Description: 'DynamoDB table name for image signatures'
+    Default: 'process.env.DYNAMODB_TABLE'
   
   Environment:
     Type: String
@@ -34,7 +34,7 @@ Resources:
             Action:
               - s3:PutObject
               - s3:GetObject
-            Resource: !Sub 'arn:aws:s3:::${BucketName}/images/*'
+            Resource: !Sub 'arn:aws:s3:::${S3BucketName}/images/*'
             Condition:
               StringEquals:
                 aws:SecureTransport: true
@@ -46,7 +46,7 @@ Resources:
             Effect: Allow
             Action:
               - s3:ListBucket
-            Resource: !Sub 'arn:aws:s3:::${BucketName}'
+            Resource: !Sub 'arn:aws:s3:::${S3BucketName}'
             Condition:
               StringEquals:
                 aws:SecureTransport: true
@@ -105,7 +105,7 @@ Resources:
                 Action:
                   - s3:PutObject
                   - s3:GetObject
-                Resource: !Sub 'arn:aws:s3:::${BucketName}/images/*'
+                Resource: !Sub 'arn:aws:s3:::${S3BucketName}/images/*'
                 Condition:
                   StringEquals:
                     aws:SecureTransport: true
@@ -115,7 +115,7 @@ Resources:
                 Effect: Allow
                 Action:
                   - s3:ListBucket
-                Resource: !Sub 'arn:aws:s3:::${BucketName}'
+                Resource: !Sub 'arn:aws:s3:::${S3BucketName}'
                 Condition:
                   StringEquals:
                     aws:SecureTransport: true

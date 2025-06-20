@@ -1,4 +1,4 @@
-import Constants from 'expo-constants';
+import { awsConfig } from '../utils/aws';
 
 /**
  * Gets image tags from the API
@@ -6,11 +6,11 @@ import Constants from 'expo-constants';
  * @returns {Promise<Object|null>} The tag response object or null if error
  */
 export const getImageTag = async (filename) => {
-  // In React Native, environment variables are accessed differently
-  const apiUrl = Constants.expoConfig?.extra?.getTagApiUrl || Constants.manifest?.extra?.getTagApiUrl;
+  const apiUrl = awsConfig.apiGateway.getTag.url;
+  const apiKey = awsConfig.apiGateway.getTag.apiKey;
   
   if (!apiUrl) {
-    console.error('Get Tag API URL not set in app config');
+    console.error('Get Tag API URL not configured in AWS config');
     return null;
   }
   
@@ -21,7 +21,8 @@ export const getImageTag = async (filename) => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Accept': 'application/json'
+        'Accept': 'application/json',
+        'x-api-key': apiKey
       },
       body: '',
     });
