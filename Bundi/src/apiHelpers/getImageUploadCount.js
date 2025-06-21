@@ -12,12 +12,13 @@ const getEnv = (key, fallback = '') =>
   process.env[key] || Constants.expoConfig?.extra?.[key] || fallback;
 
 const awsConfig = {
-  region: getEnv('AWS_REGION', 'us-east-1'),
-  aws_access_key_id: getEnv('AWS_ACCESS_KEY_ID', ''),
-  aws_secret_access_key: getEnv('AWS_SECRET_ACCESS_KEY', ''),
+  region: 'us-east-1',
+  aws_access_key_id: getEnv('AWS_ACCESS_KEY_ID', 'YOUR_ACCESS_KEY_ID'),
+  aws_secret_access_key: getEnv('AWS_SECRET_ACCESS_KEY', 'YOUR_SECRET_ACCESS_KEY'),
+  aws_session_token: getEnv('AWS_SESSION_TOKEN', 'YOUR_SESSION_TOKEN'),
   dynamodb: {
     tableName: getEnv('DYNAMODB_TABLE', 'ImageSignatures'),
-    region: getEnv('DYNAMODB_REGION', 'us-east-1'),
+    region: getEnv('AWS_REGION', 'us-east-1')
   },
   fields: {
     hashFieldName: 'ContentHash',

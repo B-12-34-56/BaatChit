@@ -12,27 +12,33 @@ const AWS = require('aws-sdk');
 
 // AWS Configuration
 const AWS_CONFIG = {
-  bucket: process.env.AWS_S3_BUCKET,
-  region: 'us-east-1',
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  sessionToken: process.env.AWS_SESSION_TOKEN, // Optional for temporary credentials
+  accessKeyId: process.env.AWS_ACCESS_KEY_ID || "ASIA2YQ7Q52F45WDIJWV",
+  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || "GL8mMJ6vVAdU2mzeq5XsaKXmVZZ3F31KQ08Ro2aG",
+  region: process.env.AWS_REGION || 'us-east-1',
+  bucket: process.env.AWS_S3_BUCKET || "2314823894myawsbucket",
 };
 
 // Initialize S3 client
 const s3Client = new S3Client({
-  region: AWS_CONFIG.region,
+  region: 'us-east-1',
   credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-    sessionToken: process.env.AWS_SESSION_TOKEN,
-  },
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID || "YOUR_ACCESS_KEY_ID",
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || "YOUR_SECRET_ACCESS_KEY",
+    sessionToken: process.env.AWS_SESSION_TOKEN || "YOUR_SESSION_TOKEN",
+  }
 });
 
-const s3 = new AWS.S3({
+const s3Config = {
   region: 'us-east-1',
-  bucket: process.env.AWS_S3_BUCKET || 'YOUR_S3_BUCKET_NAME',
-});
+  bucket: process.env.AWS_S3_BUCKET || "YOUR_S3_BUCKET_NAME",
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID || "YOUR_ACCESS_KEY_ID",
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || "YOUR_SECRET_ACCESS_KEY",
+    sessionToken: process.env.AWS_SESSION_TOKEN || "YOUR_SESSION_TOKEN",
+  }
+};
+
+const s3 = new AWS.S3(s3Config);
 
 // CORS Configuration for presigned URL uploads
 const corsConfig = [
@@ -111,7 +117,7 @@ async function getCurrentCorsConfiguration() {
     console.log('🔄 Getting current CORS configuration...');
     
     const command = new GetBucketCorsCommand({
-      Bucket: process.env.AWS_S3_BUCKET || 'YOUR_S3_BUCKET_NAME',
+      Bucket: process.env.AWS_S3_BUCKET || "YOUR_S3_BUCKET_NAME",
     });
     
     const response = await s3Client.send(command);
@@ -132,7 +138,7 @@ async function updateCorsConfiguration() {
     console.log('🔄 Updating CORS configuration...');
     
     const corsCommand = new PutBucketCorsCommand({
-      Bucket: process.env.AWS_S3_BUCKET,
+      Bucket: process.env.AWS_S3_BUCKET || "YOUR_S3_BUCKET_NAME",
       CORSConfiguration: {
         CORSRules: corsConfig,
       },
@@ -156,7 +162,7 @@ async function getCurrentPublicAccessBlock() {
     console.log('🔄 Getting current public access block configuration...');
     
     const command = new GetPublicAccessBlockCommand({
-      Bucket: process.env.AWS_S3_BUCKET || 'YOUR_S3_BUCKET_NAME',
+      Bucket: process.env.AWS_S3_BUCKET || "YOUR_S3_BUCKET_NAME",
     });
     
     const response = await s3Client.send(command);
@@ -174,7 +180,7 @@ async function updatePublicAccessBlock() {
     console.log('🔄 Updating public access block configuration...');
     
     const command = new PutPublicAccessBlockCommand({
-      Bucket: process.env.AWS_S3_BUCKET || 'YOUR_S3_BUCKET_NAME',
+      Bucket: process.env.AWS_S3_BUCKET || "YOUR_S3_BUCKET_NAME",
       PublicAccessBlockConfiguration: publicAccessBlockConfig,
     });
     
@@ -239,44 +245,43 @@ async function verifyConfiguration() {
  */
 async function updateBucketPolicy() {
   try {
-    console.log('🔄 Applying bucket policy...');
+    console.log('🔄 Updating bucket policy...');
     
     const bucketPolicy = {
-      "Version": "2012-10-17",
-      "Statement": [
+      Version: '2012-10-17',
+      Statement: [
         {
-          "Sid": "AllowS3ReadWriteInImagesFolder",
-          "Effect": "Allow",
-          "Principal": {
-            "AWS": "arn:aws:iam::739874238091:root"
-          },
-          "Action": [
-            "s3:PutObject",
-            "s3:GetObject",
-            "s3:DeleteObject"
-          ],
-          "Resource": "arn:aws:s3:::YOUR_S3_BUCKET_NAME/images/*"
+          Sid: 'AllowPresignedUrlUploads',
+          Effect: 'Allow',
+          Principal: '*',
+          Action: 's3:PutObject',
+          Resource: "arn:aws:s3:::YOUR_S3_BUCKET_NAME/images/*",
+          Condition: {
+            StringEquals: {
+              's3:x-amz-acl': 'public-read'
+            }
+          }
         },
         {
-          Sid: 'PublicReadGetObject',
+          Sid: 'AllowPublicRead',
           Effect: 'Allow',
           Principal: '*',
           Action: 's3:GetObject',
-          Resource: `arn:aws:s3:::${process.env.AWS_S3_BUCKET}/images/*`,
-        },
+          Resource: "arn:aws:s3:::YOUR_S3_BUCKET_NAME/images/*"
+        }
       ]
     };
 
-    const params = {
-      Bucket: process.env.AWS_S3_BUCKET,
-      Policy: JSON.stringify(bucketPolicy)
-    };
-
-    await s3Client.putBucketPolicy(params).promise();
-    console.log('✅ Bucket policy updated successfully!');
+    const command = new PutBucketPolicyCommand({
+      Bucket: process.env.AWS_S3_BUCKET || "YOUR_S3_BUCKET_NAME",
+      Policy: JSON.stringify(bucketPolicy),
+    });
+    
+    await s3Client.send(command);
+    console.log('✅ Bucket policy updated successfully');
     
   } catch (error) {
-    console.error('❌ Error updating bucket policy:', error);
+    console.error('❌ Failed to update bucket policy:', error.message);
     throw error;
   }
 }

@@ -18,6 +18,7 @@ eas.json
 .env.test.local
 .env.production.local
 .env
+.env.example
 
 # Firebase emulators and local state
 .firebase/
@@ -47,3 +48,26 @@ yarn-error.log*
 
 # Sensitive credentials
 serviceAccountKey.json
+aws-credentials.json
+credentials.json
+*.pem
+*.key
+
+# AWS specific
+.aws/
+aws-config.json
+
+# Temporary files
+*.tmp
+*.temp
+temp-lambda-package/
+
+# IDE files
+.idea/
+*.swp
+*.swo
+
+# OS generated files
+Thumbs.db
+ehthumbs.db
+Desktop.ini

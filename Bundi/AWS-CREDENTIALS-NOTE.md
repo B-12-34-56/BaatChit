@@ -3,7 +3,7 @@
 ## ✅ **What's Been Configured:**
 
 Your AWS configuration has been updated with:
-- **S3 Bucket**: `2314823894myawsbucket`
+- **S3 Bucket**: `YOUR_S3_BUCKET_NAME`
 - **Region**: `us-east-1`
 - **API Endpoints**: All API Gateway URLs and keys
 - **DynamoDB**: Table name and region
@@ -61,8 +61,8 @@ aws_secret_access_key: getEnv('AWS_SECRET_ACCESS_KEY', 'YOUR_ACTUAL_SECRET_KEY')
            "s3:ListBucket"
          ],
          "Resource": [
-           "arn:aws:s3:::2314823894myawsbucket",
-           "arn:aws:s3:::2314823894myawsbucket/*"
+           "arn:aws:s3:::YOUR_S3_BUCKET_NAME",
+           "arn:aws:s3:::YOUR_S3_BUCKET_NAME/*"
          ]
        }
      ]

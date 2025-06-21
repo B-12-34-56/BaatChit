@@ -7,12 +7,21 @@ const AWS = require('aws-sdk');
 const sharp = require('sharp');
 const { generateRobustHash, compareHashes, binaryToHex } = require('./imageHash');
 
+// AWS Configuration with proper region
+AWS.config.update({
+  region: process.env.AWS_REGION || 'us-east-1'
+});
+
 // AWS Services - NO Firebase
-const dynamodb = new AWS.DynamoDB.DocumentClient();
-const s3 = new AWS.S3();
+const dynamodb = new AWS.DynamoDB.DocumentClient({
+  region: process.env.AWS_REGION || 'us-east-1'
+});
+const s3 = new AWS.S3({
+  region: process.env.AWS_REGION || 'us-east-1'
+});
 
 // Configuration
-const IMAGES_TABLE = process.env.IMAGES_TABLE || 'ImagePerceptualHashes';
+const IMAGES_TABLE = process.env.IMAGES_TABLE || 'ImageSignatures';
 const MAX_UPLOADS = parseInt(process.env.MAX_UPLOADS || '3');
 const SIMILARITY_THRESHOLD = parseInt(process.env.SIMILARITY_THRESHOLD || '25');
 
@@ -120,8 +129,21 @@ exports.handler = async (event) => {
       if (!body.imageData) {
         return {
           statusCode: 400,
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ error: 'No image data provided' })
+          headers: { 
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*'
+          },
+          body: JSON.stringify({ 
+            error: 'No image data provided',
+            success: false,
+            blocked: false,
+            totalCount: 0,
+            uploadCount: 0,
+            imageUrl: null,
+            perceptualHash: null,
+            similarImages: 0,
+            message: 'No image data provided'
+          })
         };
       }
       
@@ -146,7 +168,21 @@ exports.handler = async (event) => {
     else {
       return {
         statusCode: 400,
-        body: JSON.stringify({ error: 'Invalid event type' })
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        },
+        body: JSON.stringify({ 
+          error: 'Invalid event type',
+          success: false,
+          blocked: false,
+          totalCount: 0,
+          uploadCount: 0,
+          imageUrl: null,
+          perceptualHash: null,
+          similarImages: 0,
+          message: 'Invalid event type'
+        })
       };
     }
     
@@ -172,6 +208,7 @@ exports.handler = async (event) => {
     let blocked = false;
     let message = 'Upload allowed';
     let similarImages = [];
+    let imageUrl = null;
     
     if (existingItem.Item) {
       // Exact image already exists - check count
@@ -213,6 +250,7 @@ exports.handler = async (event) => {
         
         uploadCount++;
         message = `Image uploaded successfully. This exact image has now been uploaded ${uploadCount} time(s).`;
+        similarImages = totalCountData.similarDetails;
       }
     } else {
       // New image - check for similar images first
@@ -259,6 +297,9 @@ exports.handler = async (event) => {
       }
     }
     
+    // Calculate total count for response
+    const totalCount = uploadCount + similarImages.reduce((sum, img) => sum + (img.uploadCount || 0), 0);
+    
     // For API Gateway response
     if (event.httpMethod === 'POST') {
       if (blocked) {
@@ -269,24 +310,28 @@ exports.handler = async (event) => {
             'Access-Control-Allow-Origin': '*'
           },
           body: JSON.stringify({
-            allowed: false,
+            success: false,
             blocked: true,
-            perceptualHash: perceptualHash,
-            uploadCount: uploadCount,
-            totalCount: uploadCount + similarImages.reduce((sum, img) => sum + img.uploadCount, 0),
-            similarImages: similarImages,
-            message: message
+            totalCount: totalCount || 0,
+            uploadCount: uploadCount || 0,
+            imageUrl: null,
+            perceptualHash: perceptualHash || null,
+            similarImages: similarImages.length || 0,
+            message: message || 'Image blocked'
           })
         };
       } else {
         // Generate pre-signed URL for upload
-        const uploadKey = `uploads/${perceptualHash}_${Date.now()}.jpg`;
+        const uploadKey = `images/${perceptualHash}_${Date.now()}.jpg`;
         const uploadUrl = await s3.getSignedUrlPromise('putObject', {
-          Bucket: process.env.S3_BUCKET,
+          Bucket: process.env.S3_BUCKET || 'YOUR_S3_BUCKET_NAME',
           Key: uploadKey,
           Expires: 300,
           ContentType: 'image/jpeg'
         });
+        
+        // Generate public URL for the uploaded image
+        imageUrl = `https://${process.env.S3_BUCKET || 'YOUR_S3_BUCKET_NAME'}.s3.${process.env.AWS_REGION || 'us-east-1'}.amazonaws.com/${uploadKey}`;
         
         return {
           statusCode: 200,
@@ -295,30 +340,53 @@ exports.handler = async (event) => {
             'Access-Control-Allow-Origin': '*'
           },
           body: JSON.stringify({
-            allowed: true,
+            success: true,
             blocked: false,
-            uploadUrl: uploadUrl,
-            perceptualHash: perceptualHash,
-            uploadCount: uploadCount,
-            totalCount: uploadCount + similarImages.reduce((sum, img) => sum + img.uploadCount, 0),
-            similarImages: similarImages,
-            message: message
+            totalCount: totalCount || 1,
+            uploadCount: uploadCount || 1,
+            imageUrl: imageUrl || null,
+            uploadUrl: uploadUrl || null,
+            perceptualHash: perceptualHash || null,
+            similarImages: similarImages.length || 0,
+            message: message || 'Upload successful'
           })
         };
       }
     }
     
-    // For S3 trigger - just return success
-    return { statusCode: 200 };
+    // For S3 trigger - return success with proper format
+    return { 
+      statusCode: 200,
+      body: JSON.stringify({
+        success: true,
+        blocked: blocked || false,
+        totalCount: totalCount || 0,
+        uploadCount: uploadCount || 0,
+        imageUrl: imageUrl || null,
+        perceptualHash: perceptualHash || null,
+        similarImages: similarImages.length || 0,
+        message: message || 'Processing complete'
+      })
+    };
     
   } catch (error) {
     console.error('Lambda error:', error);
     return {
       statusCode: 500,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      },
       body: JSON.stringify({ 
+        success: false,
+        blocked: false,
+        totalCount: 0,
+        uploadCount: 0,
+        imageUrl: null,
+        perceptualHash: null,
+        similarImages: 0,
         error: 'Internal server error',
-        message: error.message 
+        message: error.message || 'Unknown error occurred'
       })
     };
   }
@@ -369,12 +437,12 @@ exports.getImageStats = async (event) => {
       statusCode: 200,
       body: JSON.stringify({
         perceptualHash: perceptualHash,
-        uploadCount: result.Item.uploadCount,
-        firstUpload: result.Item.firstUpload,
-        lastUpload: result.Item.lastUpload,
-        uploads: result.Item.uploads,
-        similarImages: similarImages,
-        totalSimilarCount: similarImages.reduce((sum, img) => sum + img.uploadCount, 0)
+        uploadCount: result.Item.uploadCount || 0,
+        firstUpload: result.Item.firstUpload || null,
+        lastUpload: result.Item.lastUpload || null,
+        uploads: result.Item.uploads || [],
+        similarImages: similarImages || [],
+        totalSimilarCount: similarImages.reduce((sum, img) => sum + (img.uploadCount || 0), 0) || 0
       })
     };
   } catch (error) {

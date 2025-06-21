@@ -8,7 +8,8 @@ import {
   StatusBar,
   KeyboardAvoidingView,
   Platform,
-  Image
+  Image,
+  FileSystem
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -18,8 +19,8 @@ import * as DocumentPicker from 'expo-document-picker';
 import { getPresignedUrl } from '../services/presignService';
 import { messageService } from '../services/messageService';
 
-// Use the correct env variable for React Native
-const PRESIGN_API_URL = process.env.EXPO_PUBLIC_PRESIGN_API_URL;
+// API Configuration
+const PRESIGN_API_URL = process.env.EXPO_PUBLIC_PRESIGN_API_URL || "https://YOUR_API_GATEWAY_ID.execute-api.us-east-1.amazonaws.com/Deployment/upload-image";
 
 // Keywords you want to block
 const BLOCKED_KEYWORDS = ['name', 'signature', 'sign', 'signed'];
@@ -30,9 +31,25 @@ function isBlockedFilename(filename) {
 }
 
 async function getFileHash(uri) {
-  // For React Native, you might need a different implementation
-  // This is a placeholder - you'd need to implement file hashing
-  return 'hash_placeholder';
+  try {
+    // For React Native, we'll use a simple hash based on file properties
+    // In production, you might want to use a proper hashing library
+    const fileInfo = await FileSystem.getInfoAsync(uri);
+    const timestamp = Date.now();
+    const fileSize = fileInfo.size || 0;
+    
+    // Create a simple hash based on file properties
+    const hashString = `${uri}_${fileSize}_${timestamp}`;
+    const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(hashString));
+    const hashArray = Array.from(new Uint8Array(hash));
+    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    
+    return hashHex.substring(0, 32); // Return first 32 characters
+  } catch (error) {
+    console.warn('Failed to generate file hash, using fallback:', error);
+    // Fallback hash
+    return `hash_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+  }
 }
 
 export default function UploadToS3() {

@@ -1,6 +1,6 @@
-# AWS S3 Public Access Setup for Bundi
+# AWS S3 Public Access Setup Guide
 
-This guide will help you configure your AWS S3 bucket (`2314823894myawsbucket`) for public access uploads.
+This guide will help you configure your AWS S3 bucket (`YOUR_S3_BUCKET_NAME`) for public access uploads.
 
 ## 🚨 Important Security Notice
 
@@ -59,7 +59,7 @@ If you prefer to configure manually through the AWS Console:
 [
     {
         "AllowedHeaders": ["*"],
-        "AllowedMethods": ["GET", "PUT", "POST", "HEAD"],
+        "AllowedMethods": ["GET", "PUT", "POST", "DELETE"],
         "AllowedOrigins": ["*"],
         "ExposeHeaders": ["ETag"],
         "MaxAgeSeconds": 3000
@@ -76,25 +76,35 @@ If you prefer to configure manually through the AWS Console:
     "Version": "2012-10-17",
     "Statement": [
         {
-            "Sid": "PublicReadGetObject",
+            "Sid": "AllowPublicReadAccess",
             "Effect": "Allow",
             "Principal": "*",
             "Action": "s3:GetObject",
-            "Resource": "arn:aws:s3:::2314823894myawsbucket/*"
+            "Resource": "arn:aws:s3:::YOUR_S3_BUCKET_NAME/images/*"
         },
         {
-            "Sid": "PublicWritePutObject",
+            "Sid": "AllowAuthenticatedUploads",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam::YOUR_ACCOUNT_ID:root"
+            },
+            "Action": [
+                "s3:PutObject",
+                "s3:PutObjectAcl"
+            ],
+            "Resource": "arn:aws:s3:::YOUR_S3_BUCKET_NAME/*"
+        },
+        {
+            "Sid": "AllowPresignedUrlUploads",
             "Effect": "Allow",
             "Principal": "*",
             "Action": "s3:PutObject",
-            "Resource": "arn:aws:s3:::2314823894myawsbucket/*"
-        },
-        {
-            "Sid": "PublicListBucket",
-            "Effect": "Allow",
-            "Principal": "*",
-            "Action": "s3:ListBucket",
-            "Resource": "arn:aws:s3:::2314823894myawsbucket"
+            "Resource": "arn:aws:s3:::YOUR_S3_BUCKET_NAME/*",
+            "Condition": {
+                "StringEquals": {
+                    "s3:x-amz-acl": "public-read"
+                }
+            }
         }
     ]
 }
@@ -116,10 +126,10 @@ Your app is already configured with the correct AWS settings:
 
 ```javascript
 // From your configuration
-s3BucketName = "2314823894myawsbucket"
+s3BucketName = "YOUR_S3_BUCKET_NAME"
 s3Region = "us-east-1"
 s3ImagesPath = "images/"
-s3BaseURL = "https://2314823894myawsbucket.s3.us-east-1.amazonaws.com/images/"
+s3BaseURL = "https://YOUR_S3_BUCKET_NAME.s3.us-east-1.amazonaws.com/images/"
 ```
 
 ## 🧪 Step 6: Test the Configuration
@@ -181,13 +191,13 @@ Consider adding Lambda functions to:
 
 ```bash
 # Check bucket policy
-aws s3api get-bucket-policy --bucket 2314823894myawsbucket
+aws s3api get-bucket-policy --bucket YOUR_S3_BUCKET_NAME
 
 # Check CORS configuration
-aws s3api get-bucket-cors --bucket 2314823894myawsbucket
+aws s3api get-bucket-cors --bucket YOUR_S3_BUCKET_NAME
 
 # Check public access block settings
-aws s3api get-public-access-block --bucket 2314823894myawsbucket
+aws s3api get-public-access-block --bucket YOUR_S3_BUCKET_NAME
 ```
 
 ## 📞 Support

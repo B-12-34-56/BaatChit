@@ -1,4 +1,5 @@
 const AWS = require('aws-sdk');
+const { LambdaClient } = require('@aws-sdk/client-lambda');
 
 // Configure AWS
 AWS.config.update({
@@ -7,7 +8,14 @@ AWS.config.update({
   secretAccessKey: 'Gj6RvYYoS30yZEJ6BVIhle/SeooqG7MKfJRF84AD'
 });
 
-const lambda = new AWS.Lambda();
+const lambda = new LambdaClient({
+  region: 'us-east-1',
+  credentials: {
+    accessKeyId: 'YOUR_ACCESS_KEY_ID',
+    secretAccessKey: 'YOUR_SECRET_ACCESS_KEY',
+    sessionToken: 'YOUR_SESSION_TOKEN'
+  }
+});
 const apigateway = new AWS.APIGateway();
 
 async function findLambdaFunction() {

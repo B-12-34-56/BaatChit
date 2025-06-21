@@ -2,24 +2,35 @@
     "Version": "2012-10-17",
     "Statement": [
         {
-            "Sid": "AllowS3ReadWriteInImagesFolder",
+            "Sid": "AllowPublicReadAccess",
+            "Effect": "Allow",
+            "Principal": "*",
+            "Action": "s3:GetObject",
+            "Resource": "arn:aws:s3:::YOUR_S3_BUCKET_NAME/images/*"
+        },
+        {
+            "Sid": "AllowAuthenticatedUploads",
             "Effect": "Allow",
             "Principal": {
-                "AWS": "arn:aws:iam::739874238091:root"
+                "AWS": "arn:aws:iam::YOUR_ACCOUNT_ID:user/YOUR_IAM_USER"
             },
             "Action": [
                 "s3:PutObject",
-                "s3:GetObject",
-                "s3:DeleteObject"
+                "s3:PutObjectAcl"
             ],
             "Resource": "arn:aws:s3:::YOUR_S3_BUCKET_NAME/images/*"
         },
         {
-            "Sid": "PublicReadGetObject",
+            "Sid": "AllowPresignedUrlUploads",
             "Effect": "Allow",
             "Principal": "*",
-            "Action": "s3:GetObject",
-            "Resource": "arn:aws:s3:::process.env.AWS_S3_BUCKET/images/*"
+            "Action": "s3:PutObject",
+            "Resource": "arn:aws:s3:::YOUR_S3_BUCKET_NAME/images/*",
+            "Condition": {
+                "StringEquals": {
+                    "s3:x-amz-acl": "public-read"
+                }
+            }
         }
     ]
 }

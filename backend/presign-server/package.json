@@ -1,0 +1,29 @@
+{
+  "name": "baatchit-presign-server",
+  "version": "1.0.0",
+  "description": "Presign server for BaatChit image uploads",
+  "main": "presign-server.js",
+  "scripts": {
+    "start": "node presign-server.js",
+    "dev": "nodemon presign-server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "@aws-sdk/client-s3": "^3.450.0",
+    "@aws-sdk/s3-request-presigner": "^3.450.0",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "keywords": [
+    "aws",
+    "s3",
+    "presign",
+    "upload",
+    "image"
+  ],
+  "author": "",
+  "license": "ISC"
+} 
