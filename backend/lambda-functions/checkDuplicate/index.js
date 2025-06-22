@@ -19,6 +19,12 @@ const IMAGES_TABLE = process.env.IMAGES_TABLE || 'ImageSignatures';
 const MAX_UPLOADS = parseInt(process.env.MAX_UPLOADS || '3');
 const SIMILARITY_THRESHOLD = parseInt(process.env.SIMILARITY_THRESHOLD || '25');
 
+// API Credentials from environment variables
+const UPLOAD_KEY = process.env.UPLOAD_KEY || '';
+const BLOCK_KEY = process.env.BLOCK_KEY || '';
+const CHECK_DUPLICATE_KEY = process.env.CHECK_DUPLICATE_KEY || '';
+const S3_BUCKET = process.env.S3_BUCKET || '';
+
 // ===========================
 // CROSS-DEVICE DUPLICATE DETECTION
 // ===========================
@@ -199,7 +205,7 @@ exports.handler = async (event) => {
         if (event.Records) {
           const s3Event = event.Records[0].s3;
           await s3Client.send(new DeleteObjectCommand({
-            Bucket: s3Event.bucket.name,
+            Bucket: s3Event.bucket.name || S3_BUCKET,
             Key: decodeURIComponent(s3Event.object.key.replace(/\+/g, ' '))
           }));
           console.log('🗑️ Deleted blocked image from S3');
@@ -238,7 +244,7 @@ exports.handler = async (event) => {
         if (event.Records) {
           const s3Event = event.Records[0].s3;
           await s3Client.send(new DeleteObjectCommand({
-            Bucket: s3Event.bucket.name,
+            Bucket: s3Event.bucket.name || S3_BUCKET,
             Key: decodeURIComponent(s3Event.object.key.replace(/\+/g, ' '))
           }));
           console.log('🗑️ Deleted blocked image from S3');
@@ -308,7 +314,7 @@ exports.handler = async (event) => {
         try {
           // Upload the image directly to S3
           await s3Client.send(new PutObjectCommand({
-            Bucket: process.env.S3_BUCKET,
+            Bucket: S3_BUCKET,
             Key: uploadKey,
             Body: imageBuffer,
             ContentType: 'image/jpeg',
@@ -317,14 +323,16 @@ exports.handler = async (event) => {
               userId: userId || 'anonymous',
               uploadTimestamp: Date.now().toString(),
               originalFilename: fileName,
-              perceptualHash: perceptualHash
+              perceptualHash: perceptualHash,
+              uploadKey: UPLOAD_KEY,
+              blockKey: BLOCK_KEY
             }
           }));
           
           console.log('✅ [checkDuplicate] Image uploaded to S3:', uploadKey);
           
           // Generate public URL for the uploaded image
-          imageUrl = `https://${process.env.S3_BUCKET}.s3.${process.env.AWS_REGION || 'us-east-1'}.amazonaws.com/${uploadKey}`;
+          imageUrl = `https://${S3_BUCKET}.s3.${process.env.AWS_REGION || 'us-east-1'}.amazonaws.com/${uploadKey}`;
           
           return {
             statusCode: 200,
@@ -390,7 +398,13 @@ exports.handler = async (event) => {
       body: JSON.stringify({ 
         error: 'Internal server error',
         success: false,
-        imageUrl: null
+        blocked: false,
+        totalCount: 0,
+        uploadCount: 0,
+        imageUrl: null,
+        perceptualHash: null,
+        similarImages: [],
+        message: `Error: ${error.message || 'Unknown error occurred'}`
       })
     };
   }

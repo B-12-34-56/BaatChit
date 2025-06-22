@@ -4,6 +4,13 @@
 .pnp.js
 app.json
 eas.json
+backend/lambda-functions/checkDuplicate/node_modules/
+backend/lambda-functions/checkDuplicate/package-lock.json
+backend/lambda-functions/uploadImage/node_modules/
+backend/lambda-functions/uploadImage/package-lock.json
+
+Bundi/node_modules/
+Bundi/package-lock.json
 
 # testing
 /coverage

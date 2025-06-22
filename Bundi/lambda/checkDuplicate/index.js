@@ -10,7 +10,8 @@ const { PutObjectCommand } = require('@aws-sdk/client-s3');
 
 // AWS Configuration with proper region
 AWS.config.update({
-  region: process.env.AWS_REGION || 'us-east-1'
+  region: process.env.AWS_REGION || 'us-east-1',
+  // Credentials should be provided through environment variables or IAM role
 });
 
 // AWS Services - NO Firebase
@@ -25,6 +26,7 @@ const s3 = new AWS.S3({
 const IMAGES_TABLE = process.env.IMAGES_TABLE || 'ImageSignatures';
 const MAX_UPLOADS = parseInt(process.env.MAX_UPLOADS || '3');
 const SIMILARITY_THRESHOLD = parseInt(process.env.SIMILARITY_THRESHOLD || '25');
+const S3_BUCKET = process.env.S3_BUCKET || '';
 
 // ===========================
 // CROSS-DEVICE DUPLICATE DETECTION
@@ -150,8 +152,8 @@ exports.handler = async (event) => {
       
       imageBuffer = Buffer.from(body.imageData, 'base64');
       userId = body.userId || 'anonymous';
-      fileName = body.fileName || 'unnamed.jpg';
-      fileHash = body.fileHash || null; // SHA-256 from client
+      fileName = body.fileName || body.filename || 'unnamed.jpg';
+      fileHash = body.fileHash || body.imageHash || null; // Handle both field names
     }
     // Handle S3 trigger (post-upload processing)
     else if (event.Records && event.Records[0].s3) {
@@ -325,15 +327,15 @@ exports.handler = async (event) => {
         // Generate pre-signed URL for upload
         const uploadKey = `images/${perceptualHash}_${Date.now()}.jpg`;
         const uploadUrl = await s3.getSignedUrlPromise('putObject', {
-          Bucket: process.env.S3_BUCKET || '2314823894myawsbucket',
+          Bucket: S3_BUCKET,
           Key: uploadKey,
           Expires: 300,
           ContentType: 'image/jpeg'
         });
         
         // Upload the image directly to S3
-        await s3Client.send(new PutObjectCommand({
-          Bucket: process.env.S3_BUCKET,
+        await s3.send(new PutObjectCommand({
+          Bucket: S3_BUCKET,
           Key: uploadKey,
           Body: imageBuffer,
           ContentType: 'image/jpeg',
@@ -349,7 +351,7 @@ exports.handler = async (event) => {
         console.log('✅ [checkDuplicate] Image uploaded to S3:', uploadKey);
         
         // Generate public URL for the uploaded image
-        imageUrl = `https://${process.env.S3_BUCKET}.s3.${process.env.AWS_REGION || 'us-east-1'}.amazonaws.com/${uploadKey}`;
+        imageUrl = `https://${S3_BUCKET}.s3.${process.env.AWS_REGION || 'us-east-1'}.amazonaws.com/${uploadKey}`;
         
         return {
           statusCode: 200,

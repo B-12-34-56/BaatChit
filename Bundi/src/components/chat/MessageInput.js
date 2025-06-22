@@ -25,13 +25,16 @@ import { getStorage, ref, uploadBytesResumable, getDownloadURL } from "firebase/
 import { getFirestore, doc, getDoc, setDoc, updateDoc, serverTimestamp, collection, getDocs, query, where, limit, orderBy, deleteDoc } from "firebase/firestore";
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { uploadUserContent } from '../../services/storageService';
-import { awsConfig, uploadImageToS3, getImageUploadCountDynamo, incrementImageUploadCountDynamo, checkAWSCredentials } from '../../utils/aws';
+import { awsConfig, uploadImageToS3, getImageUploadCountDynamo, incrementImageUploadCountDynamo, checkAWSCredentials, api } from '../../utils/aws';
 import { getPresignedUrl } from '../../services/presignService';
 import { uploadImage } from '../../services/uploadService';
+import Toast from 'react-native-toast-message';
+import { styles } from './MessageStyles';
+import { MaterialIcons } from '@expo/vector-icons';
 
-// AWS Lambda endpoints
-const LAMBDA_CHECK_DUPLICATE = process.env.REACT_APP_LAMBDA_CHECK_DUPLICATE || 'https://your-api-gateway-url/check-duplicate';
-const LAMBDA_GET_STATS = process.env.REACT_APP_LAMBDA_GET_STATS || 'https://your-api-gateway-url/get-stats';
+// AWS API Endpoints from environment variables
+const LAMBDA_CHECK_DUPLICATE = process.env.REACT_APP_LAMBDA_CHECK_DUPLICATE || '';
+const LAMBDA_GET_STATS = process.env.REACT_APP_LAMBDA_GET_STATS || '';
 
 // Timing utility
 const getTimestamp = () => {
@@ -81,20 +84,30 @@ async function checkDuplicateWithLambda(imageUri, fileHash, userId, fileName) {
       encoding: FileSystem.EncodingType.Base64,
     });
     
-    const response = await fetch(LAMBDA_CHECK_DUPLICATE, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        imageData: base64,
-        fileHash: fileHash,
-        userId: userId,
-        fileName: fileName
-      })
+    console.log('🔍 [checkDuplicateWithLambda] Sending request via API client');
+    console.log('🔍 [checkDuplicateWithLambda] Request payload:', {
+      hasImageData: !!base64,
+      imageDataLength: base64.length,
+      fileHash: fileHash.substring(0, 12) + '...',
+      userId,
+      fileName
     });
     
-    const result = await response.json();
+    const result = await api.checkDuplicate({
+      imageData: base64,
+      fileHash: fileHash,
+      userId: userId,
+      fileName: fileName
+    });
+    
+    console.log('🔍 [checkDuplicateWithLambda] Parsed result:', {
+      success: result.success,
+      blocked: result.blocked,
+      hasImageUrl: !!result.imageUrl,
+      totalCount: result.totalCount,
+      uploadCount: result.uploadCount,
+      message: result.message
+    });
     
     logEvent('LAMBDA_CHECK_RESULT', {
       blocked: result.blocked,
@@ -105,7 +118,27 @@ async function checkDuplicateWithLambda(imageUri, fileHash, userId, fileName) {
     
     return result;
   } catch (error) {
-    console.error('Error checking duplicate with Lambda:', error);
+    console.error('❌ [checkDuplicateWithLambda] Error:', error);
+    
+    // Show specific toast for 403 errors
+    if (error.message.includes('Auth token missing')) {
+      Toast.show({
+        type: 'error',
+        text1: 'Authentication Error',
+        text2: 'Auth token missing – check API key or stage name',
+        position: 'top',
+        visibilityTime: 5000,
+      });
+    } else {
+      Toast.show({
+        type: 'error',
+        text1: 'Upload Error',
+        text2: error.message || 'Failed to check for duplicates',
+        position: 'top',
+        visibilityTime: 4000,
+      });
+    }
+    
     throw error;
   }
 }
@@ -141,7 +174,7 @@ async function handleAWSUpload(imageUri, imageFile, currentUser) {
     // Step 1: Generate file hash
     const fileHash = await getFileHash(imageUri);
     
-    // Step 2: Check for duplicates with Lambda (includes perceptual hashing)
+    // Step 2: Check for duplicates with Lambda (includes perceptual hashing and upload)
     const duplicateCheck = await checkDuplicateWithLambda(
       imageUri, 
       fileHash, 
@@ -170,74 +203,56 @@ async function handleAWSUpload(imageUri, imageFile, currentUser) {
       };
     }
     
-    // Step 4: Upload to S3 (if we have a pre-signed URL from Lambda)
-    let imageUrl;
+    // Step 4: Use the image URL from Lambda (upload already completed)
+    const imageUrl = duplicateCheck.imageUrl;
     
-    if (duplicateCheck.uploadUrl) {
-      // Use the pre-signed URL from Lambda
-      const fileBlob = await fetch(imageUri).then(r => r.blob());
-      const uploadResponse = await fetch(duplicateCheck.uploadUrl, {
-        method: 'PUT',
-        body: fileBlob,
-        headers: {
-          'Content-Type': imageFile?.type || 'image/jpeg'
-        }
-      });
+    if (!imageUrl) {
+      console.warn('⚠️ Lambda function did not return image URL, using placeholder');
+      // Return partial success with placeholder or fallback URL
+      const s3Bucket = process.env.S3_BUCKET_NAME || 'images-bucket';
+      const region = process.env.AWS_REGION || 'us-east-1';
+      const placeholderUrl = `https://${s3Bucket}.s3.${region}.amazonaws.com/images/${currentUser.uid}/placeholder_${Date.now()}.jpg`;
       
-      if (!uploadResponse.ok) {
-        throw new Error('Failed to upload to S3');
-      }
-      
-      // Extract the URL without query parameters
-      imageUrl = duplicateCheck.uploadUrl.split('?')[0];
-    } else {
-      // Fallback to other upload methods
-      try {
-        const uploadResult = await uploadImage({
-          image: await FileSystem.readAsStringAsync(imageUri, { encoding: FileSystem.EncodingType.Base64 }),
-          filename: imageFile.fileName || `image_${Date.now()}_${fileHash.substring(0, 8)}.jpg`,
-          fileHash: fileHash,
-          contentType: imageFile.type || 'image/jpeg',
-          userId: currentUser.uid
-        });
-        
-        if (uploadResult.success) {
-          imageUrl = uploadResult.imageUrl;
-        }
-      } catch (uploadServiceError) {
-        console.warn('Upload service failed, trying direct S3:', uploadServiceError.message);
-        
-        // Final fallback
-        imageUrl = await uploadImageToS3(imageUri, currentUser.uid, fileHash, imageFile);
-      }
+      return {
+        imageUrl: placeholderUrl,
+        imageHash: fileHash,
+        perceptualHash: duplicateCheck.perceptualHash || fileHash,
+        imageTag: 'warning',
+        warningMessage: 'Upload partially completed. The image may take a moment to appear.',
+        blocked: false,
+        totalCount: duplicateCheck.totalCount || 1,
+        uploadCount: duplicateCheck.uploadCount || 1,
+        similarImages: duplicateCheck.similarImages || []
+      };
     }
     
     const duration = performance.now() - startTime;
     
     logEvent('AWS_UPLOAD_COMPLETE', {
       duration: `${duration.toFixed(2)}ms`,
-      totalCount: duplicateCheck.totalCount,
-      uploadCount: duplicateCheck.uploadCount,
+      totalCount: duplicateCheck.totalCount || 1,
+      uploadCount: duplicateCheck.uploadCount || 1,
       similarImages: duplicateCheck.similarImages?.length || 0
     });
     
     // Determine image tag based on count
     let imageTag = 'original';
-    if (duplicateCheck.totalCount >= 3) {
+    const totalCount = duplicateCheck.totalCount || 1;
+    if (totalCount >= 3) {
       imageTag = 'blocked';
-    } else if (duplicateCheck.totalCount === 2) {
+    } else if (totalCount === 2) {
       imageTag = 'warning';
     }
     
     return {
       imageUrl,
       imageHash: fileHash,
-      perceptualHash: duplicateCheck.perceptualHash,
+      perceptualHash: duplicateCheck.perceptualHash || fileHash,
       imageTag,
-      warningMessage: duplicateCheck.message,
+      warningMessage: duplicateCheck.message || 'Upload successful',
       blocked: false,
-      totalCount: duplicateCheck.totalCount,
-      uploadCount: duplicateCheck.uploadCount,
+      totalCount: totalCount,
+      uploadCount: duplicateCheck.uploadCount || 1,
       similarImages: duplicateCheck.similarImages || []
     };
     
@@ -281,6 +296,37 @@ function formatUploadHistory(similarImages, uploadCount) {
   });
   
   return allUploads;
+}
+
+// Test upload function for debugging
+async function testUpload(imageUri, currentUser) {
+  try {
+    console.log('🧪 [testUpload] Starting test upload...');
+    
+    const base64 = await FileSystem.readAsStringAsync(imageUri, { 
+      encoding: FileSystem.EncodingType.Base64 
+    });
+    
+    const testResult = await uploadImage({
+      image: base64,
+      filename: 'test_image.jpg',
+      fileHash: 'test_hash_123',
+      contentType: 'image/jpeg',
+      userId: currentUser.uid
+    });
+    
+    console.log('🧪 [testUpload] Test result:', {
+      success: testResult.success,
+      imageUrl: testResult.imageUrl?.substring(0, 50) + '...',
+      blocked: testResult.blocked,
+      totalCount: testResult.totalCount
+    });
+    
+    return testResult;
+  } catch (error) {
+    console.error('🧪 [testUpload] Test failed:', error);
+    throw error;
+  }
 }
 
 const MessageInput = () => {
@@ -409,6 +455,14 @@ const MessageInput = () => {
     // Send message if we have a valid upload or text-only message
     if (!imageUri || imageUrl) {
       try {
+        console.log('📤 [MessageInput] Sending message with image:', {
+          hasImage: !!imageUri,
+          imageUrl: imageUrl?.substring(0, 50) + '...',
+          imageHash: imageHash?.substring(0, 12) + '...',
+          imageTag,
+          text: text || (imageUri ? `[Image: ${imageFile?.fileName || 'image.jpg'}]` : '')
+        });
+        
         await messageService.sendMessage(
           data.chatId,
           {
@@ -419,13 +473,15 @@ const MessageInput = () => {
             recipientPhotoURL: data.user?.photoURL,
             text: text || (imageUri ? `[Image: ${imageFile?.fileName || 'image.jpg'}]` : ''),
             type: imageUri ? 'image' : 'text',
-            imageUrl,
-            imageHash,
-            imageTag,
+            imageUrl: imageUrl || null,
+            imageHash: imageHash || null,
+            imageTag: imageTag || null,
             createdAt: new Date(),
           },
           data.user?.uid
         );
+        
+        console.log('✅ [MessageInput] Message sent successfully');
         
         if (mounted.current) {
           setText('');
@@ -436,9 +492,14 @@ const MessageInput = () => {
           setShowDuplicateModal(false);
         }
       } catch (error) {
-        console.error('Message send error:', error);
+        console.error('❌ [MessageInput] Message send error:', error);
         Alert.alert('Send Failed', 'Failed to send message. Please try again.');
       }
+    } else {
+      console.warn('⚠️ [MessageInput] Cannot send message - missing image URL:', {
+        hasImageUri: !!imageUri,
+        hasImageUrl: !!imageUrl
+      });
     }
   };
 
@@ -587,6 +648,46 @@ const MessageInput = () => {
           <Ionicons name="attach" size={24} color="#007AFF" />
         </TouchableOpacity>
         
+        {/* Test button for debugging */}
+        {imageUri && (
+          <TouchableOpacity 
+            style={[styles.attachButton, { backgroundColor: '#ff9800' }]} 
+            onPress={async () => {
+              try {
+                console.log('🧪 Testing upload...');
+                await testUpload(imageUri, currentUser);
+              } catch (error) {
+                console.error('🧪 Test failed:', error);
+                Alert.alert('Test Failed', error.message);
+              }
+            }}
+            disabled={uploading}
+          >
+            <Ionicons name="bug" size={20} color="white" />
+          </TouchableOpacity>
+        )}
+        
+        {/* Toggle between presign server and Lambda */}
+        {imageUri && (
+          <TouchableOpacity 
+            style={[styles.attachButton, { backgroundColor: '#4caf50' }]} 
+            onPress={() => {
+              Alert.alert(
+                'Upload Method',
+                'Choose upload method:',
+                [
+                  { text: 'Presign Server', onPress: () => console.log('Using presign server') },
+                  { text: 'Lambda', onPress: () => console.log('Using Lambda') },
+                  { text: 'Cancel', style: 'cancel' }
+                ]
+              );
+            }}
+            disabled={uploading}
+          >
+            <Ionicons name="settings" size={20} color="white" />
+          </TouchableOpacity>
+        )}
+        
         <TouchableOpacity
           style={[
             styles.sendButton,
@@ -620,6 +721,7 @@ const MessageInput = () => {
       )}
 
       {renderDuplicateModal()}
+      <Toast />
     </View>
   );
 };

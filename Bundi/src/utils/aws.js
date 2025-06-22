@@ -14,7 +14,11 @@ import * as ImageManipulator from 'expo-image-manipulator';
 // Centralized API client with retry logic
 export const api = {
   baseURL: process.env.REACT_APP_LAMBDA_BASE_URL || 'https://np39lyhj20.execute-api.us-east-1.amazonaws.com/Deployment',
-  apiKey: process.env.AWS_UPLOAD_API_KEY,
+  checkDuplicateURL: process.env.CHECK_DUPLICATE_URL || 'https://71yegno641.execute-api.us-east-1.amazonaws.com/Deployment/check-duplicate',
+  uploadImageURL: process.env.UPLOAD_IMAGE_URL || 'https://np39lyhj20.execute-api.us-east-1.amazonaws.com/Deployment/upload-image',
+  uploadKey: process.env.UPLOAD_KEY || '',
+  blockKey: process.env.BLOCK_KEY || '',
+  checkDuplicateKey: process.env.CHECK_DUPLICATE_KEY || '',
   timeout: 15000,
   
   async request(endpoint, options = {}) {
@@ -23,7 +27,7 @@ export const api = {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': this.apiKey,
+        'x-api-key': this.uploadKey, // Default to upload key
         ...options.headers,
       },
       timeout: this.timeout,
@@ -49,9 +53,37 @@ export const api = {
   },
   
   async checkDuplicate(payload) {
-    return this.request('/check-duplicate', {
-      body: JSON.stringify(payload),
-    });
+    try {
+      const response = await fetch(this.checkDuplicateURL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': this.checkDuplicateKey
+        },
+        body: JSON.stringify(payload)
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error ${response.status}: ${response.statusText}`);
+      }
+      
+      const result = await response.json();
+      
+      // Ensure all required fields have values
+      return {
+        success: result.success !== undefined ? result.success : false,
+        blocked: result.blocked !== undefined ? result.blocked : false,
+        totalCount: result.totalCount || 0,
+        uploadCount: result.uploadCount || 0,
+        imageUrl: result.imageUrl || null,
+        perceptualHash: result.perceptualHash || null,
+        similarImages: result.similarImages || [],
+        message: result.message || 'No message from Lambda function'
+      };
+    } catch (error) {
+      console.error(`API checkDuplicate failed:`, error);
+      throw error;
+    }
   }
 };
 
@@ -66,15 +98,15 @@ const awsConfig = {
  sessionToken: process.env.AWS_SESSION_TOKEN,
  region: process.env.AWS_REGION || 'us-east-1',
   s3: {
-   bucketName: process.env.AWS_S3_BUCKET,
+   bucketName: process.env.S3_BUCKET_NAME,
    region: process.env.AWS_REGION || "us-east-1",
    imagesPath: "images/",
    baseURL: process.env.AWS_S3_BASE_URL,
  },
   apiGateway: {
    upload: {
-     url: process.env.AWS_UPLOAD_API_URL,
-     apiKey: process.env.AWS_UPLOAD_API_KEY,
+     url: process.env.UPLOAD_IMAGE_URL || 'https://np39lyhj20.execute-api.us-east-1.amazonaws.com/Deployment/upload-image',
+     apiKey: process.env.UPLOAD_KEY,
    },
    getTag: {
      url: process.env.AWS_GETTAG_API_URL,
@@ -82,7 +114,11 @@ const awsConfig = {
    },
    blockImage: {
      url: process.env.AWS_BLOCKIMAGE_API_URL,
-     apiKey: process.env.AWS_BLOCKIMAGE_API_KEY,
+     apiKey: process.env.BLOCK_KEY,
+   },
+   checkDuplicate: {
+     url: process.env.CHECK_DUPLICATE_URL || 'https://71yegno641.execute-api.us-east-1.amazonaws.com/Deployment/check-duplicate',
+     apiKey: process.env.CHECK_DUPLICATE_KEY,
    },
  },
   lambda: {
@@ -122,7 +158,7 @@ const awsConfig = {
    }
  },
   dynamoDB: {
-   tableName: process.env.DYNAMODB_TABLE || "ImageSignatures",
+   tableName: "ImageSignatures",
    region: process.env.AWS_REGION || "us-east-1",
    endpoint: process.env.AWS_DYNAMODB_ENDPOINT,
    getTagApiGateway: process.env.AWS_GETTAG_API_GATEWAY,
@@ -520,7 +556,7 @@ export const blockImage = async (contentHash, reason = 'Inappropriate content') 
      method: 'POST',
      headers: {
        'Content-Type': 'application/json',
-       'x-api-key': awsConfig.apiGateway.blockImage.apiKey,
+       'x-api-key': api.blockKey,
      },
      body: JSON.stringify({
        contentHash: contentHash,
@@ -609,13 +645,13 @@ export const testLambdaFunction = async (testData = {}) => {
    console.log('🧪 Testing Lambda function with echo handler...');
   
    // Use the test echo handler URL if available, otherwise simulate
-   const testUrl = awsConfig.apiGateway.upload.url.replace('/upload-image', '/test-echo');
+   const testUrl = api.uploadImageURL.replace('/upload-image', '/test-echo');
   
    const response = await fetch(testUrl, {
      method: 'POST',
      headers: {
        'Content-Type': 'application/json',
-       'x-api-key': awsConfig.apiGateway.upload.apiKey,
+       'x-api-key': api.uploadKey,
      },
      body: JSON.stringify({
        test: true,
@@ -696,7 +732,12 @@ export const uploadImageToS3 = async (fileUri, userId, fileHash, fileInfo) => {
      }
    }
 
-   // Check file size first to avoid 413 errors
+        // Use AWS API credentials
+     const uploadApiKey = api.uploadKey;
+     const checkDuplicateApiKey = api.checkDuplicateKey;
+     const blockApiKey = api.blockKey;
+     
+     // Check file size first to avoid 413 errors
    const fileInfo = await FileSystem.getInfoAsync(fileUri);
    const fileSizeInMB = (fileInfo.size || 0) / (1024 * 1024);
    

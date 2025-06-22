@@ -19,8 +19,8 @@ import * as DocumentPicker from 'expo-document-picker';
 import { getPresignedUrl } from '../services/presignService';
 import { messageService } from '../services/messageService';
 
-// API Configuration
-const PRESIGN_API_URL = process.env.EXPO_PUBLIC_PRESIGN_API_URL || "https://YOUR_API_GATEWAY_ID.execute-api.us-east-1.amazonaws.com/Deployment/upload-image";
+// Use environment variables without hardcoded fallbacks
+const PRESIGN_API_URL = process.env.EXPO_PUBLIC_PRESIGN_API_URL || "";
 
 // Keywords you want to block
 const BLOCKED_KEYWORDS = ['name', 'signature', 'sign', 'signed'];

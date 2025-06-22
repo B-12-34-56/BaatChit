@@ -1,0 +1,30 @@
+{
+  "name": "upload-image",
+  "version": "1.0.0",
+  "description": "AWS Lambda function for image upload with presigned URLs and direct multipart upload",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "zip": "zip -r upload-image.zip . -x '*.git*' 'node_modules/.cache/*'",
+    "install-deps": "npm ci --omit=dev",
+    "deploy": "npm run install-deps && npm run zip"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.547.0",
+    "@aws-sdk/s3-request-presigner": "^3.547.0",
+    "@aws-sdk/client-dynamodb": "^3.547.0",
+    "parse-multipart": "^1.0.4"
+  },
+  "devDependencies": {},
+  "keywords": [
+    "aws",
+    "lambda",
+    "image",
+    "upload",
+    "s3",
+    "presigned-url",
+    "multipart"
+  ],
+  "author": "",
+  "license": "ISC"
+} 

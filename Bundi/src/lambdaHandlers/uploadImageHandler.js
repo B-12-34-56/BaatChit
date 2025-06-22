@@ -6,11 +6,11 @@ const multipart = require('parse-multipart');
 
 // Import AWS configuration from utils
 const awsConfig = {
-  region: process.env.AWS_REGION || 'us-east-1',
-  bucket: process.env.AWS_S3_BUCKET,
+  region: 'us-east-1',
+  bucket: process.env.S3_BUCKET_NAME || '',
   dynamodb: {
-    tableName: process.env.DYNAMODB_TABLE || 'ImageSignatures',
-    region: process.env.AWS_REGION || 'us-east-1',
+    tableName: 'ImageSignatures',
+    region: 'us-east-1',
   },
   s3: {
     imagesPath: process.env.S3_IMAGES_PATH || 'images/',

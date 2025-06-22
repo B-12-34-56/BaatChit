@@ -16,30 +16,28 @@ const port = process.env.PORT || 4000;
 const BLOCKED_KEYWORDS = ['name', 'signature', 'sign', 'signed'];
 
 // AWS Configuration - using environment variables only
-const AWS_CONFIG = {
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  sessionToken: process.env.AWS_SESSION_TOKEN,
-  region: process.env.AWS_REGION || 'us-east-1',
-  bucket: process.env.AWS_BUCKET
-};
+const AWS_BUCKET = process.env.S3_BUCKET_NAME || "";
+const AWS_REGION = "us-east-1";
+const AWS_ACCESS_KEY_ID = process.env.AWS_ACCESS_KEY_ID;
+const AWS_SECRET_ACCESS_KEY = process.env.AWS_SECRET_ACCESS_KEY;
+const AWS_SESSION_TOKEN = process.env.AWS_SESSION_TOKEN;
 
 const S3_SUBFOLDER = process.env.S3_SUBFOLDER || 'images/';
 
 console.log('🔧 Presign server configuration:', {
-  region: AWS_CONFIG.region,
-  bucket: AWS_CONFIG.bucket,
-  hasAccessKey: !!AWS_CONFIG.accessKeyId,
-  hasSecretKey: !!AWS_CONFIG.secretAccessKey,
+  region: AWS_REGION,
+  bucket: AWS_BUCKET,
+  hasAccessKey: !!AWS_ACCESS_KEY_ID,
+  hasSecretKey: !!AWS_SECRET_ACCESS_KEY,
   subfolder: S3_SUBFOLDER
 });
 
 const s3Client = new S3Client({
-  region: AWS_CONFIG.region,
+  region: AWS_REGION,
   credentials: {
-    accessKeyId: AWS_CONFIG.accessKeyId,
-    secretAccessKey: AWS_CONFIG.secretAccessKey,
-    sessionToken: AWS_CONFIG.sessionToken,
+    accessKeyId: AWS_ACCESS_KEY_ID,
+    secretAccessKey: AWS_SECRET_ACCESS_KEY,
+    sessionToken: AWS_SESSION_TOKEN,
   }
 });
 
@@ -89,7 +87,7 @@ app.get('/presign', async (req, res) => {
 
   try {
     const command = new PutObjectCommand({
-      Bucket: AWS_CONFIG.bucket,
+      Bucket: AWS_BUCKET,
       Key: key,
       ContentType: contentType,
       ACL: 'public-read', // Make uploaded files publicly readable
@@ -106,7 +104,7 @@ app.get('/presign', async (req, res) => {
     res.json({ 
       presignedUrl,
       key: key,
-      bucket: AWS_CONFIG.bucket,
+      bucket: AWS_BUCKET,
       expiresIn: 900
     });
   } catch (err) {
@@ -121,8 +119,8 @@ app.get('/health', (req, res) => {
     status: 'ok', 
     timestamp: new Date().toISOString(),
     config: {
-      region: AWS_CONFIG.region,
-      bucket: AWS_CONFIG.bucket,
+      region: AWS_REGION,
+      bucket: AWS_BUCKET,
       subfolder: S3_SUBFOLDER
     }
   });

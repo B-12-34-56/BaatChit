@@ -1,10 +1,10 @@
 // Upload Service - Sends single JSON payload to API
 import { awsConfig } from '../utils/aws';
+import axios from 'axios';
 
-// Get API URL from centralized AWS config - use the checkDuplicate endpoint instead
-const API_URL = process.env.REACT_APP_LAMBDA_CHECK_DUPLICATE || 'https://np39lyhj20.execute-api.us-east-1.amazonaws.com/Deployment/check-duplicate';
-// Use the correct API key for the check-duplicate endpoint
-const API_KEY = process.env.AWS_UPLOAD_API_KEY;
+// Use environment variable with fallback
+const API_URL = process.env.CHECK_DUPLICATE_URL || '';
+const API_KEY = process.env.CHECK_DUPLICATE_KEY || '';
 
 // Debug configuration
 console.log('🔧 [uploadService] Configuration:', {

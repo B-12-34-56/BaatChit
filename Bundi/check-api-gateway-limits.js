@@ -25,8 +25,8 @@ async function checkLimits() {
     console.log('- Your image size: 6.2MB (6,194,596 bytes)');
     console.log('- Status: ⚠️  Very close to limit\n');
 
-    // Check specific API Gateway
-    const apiId = 'YOUR_API_GATEWAY_ID'; // Replace with your actual API ID
+    // Check specific API Gateway - using the upload API Gateway ID
+    const apiId = 'np39lyhj20'; // Upload API Gateway ID from aws.js
     try {
       const api = await apigateway.getRestApi({ restApiId: apiId }).promise();
       console.log('📊 Your API Gateway Details:');

@@ -14,32 +14,32 @@ async function deployLambda() {
   try {
     console.log('🚀 Starting Lambda deployment...');
     
-    // Create a temporary directory for the Lambda package
+    // Use the existing temp-lambda-package directory
     const tempDir = path.join(__dirname, '../temp-lambda-package');
-    if (fs.existsSync(tempDir)) {
-      fs.rmSync(tempDir, { recursive: true, force: true });
-    }
-    fs.mkdirSync(tempDir, { recursive: true });
     
-    // Copy the Lambda function code
-    const lambdaCode = fs.readFileSync(
-      path.join(__dirname, '../src/lambdaHandlers/uploadImageHandler.js'),
-      'utf8'
-    );
-    fs.writeFileSync(path.join(tempDir, 'index.js'), lambdaCode);
+    // Check if the directory and index.js exist
+    if (!fs.existsSync(tempDir)) {
+      throw new Error('temp-lambda-package directory does not exist');
+    }
+    
+    const indexJsPath = path.join(tempDir, 'index.js');
+    if (!fs.existsSync(indexJsPath)) {
+      throw new Error('index.js file does not exist in temp-lambda-package');
+    }
+    
+    // Read the existing Lambda function code
+    const lambdaCode = fs.readFileSync(indexJsPath, 'utf8');
     
     console.log('📄 Lambda code loaded, size:', lambdaCode.length, 'characters');
     
-    // Create package.json for dependencies with correct packages
+    // Create package.json for dependencies with minimal packages
     const packageJson = {
       "name": "upload-image-handler",
       "version": "1.0.0",
       "dependencies": {
-        "aws-sdk": "^2.1450.0",
         "@aws-sdk/client-s3": "^3.0.0",
         "@aws-sdk/client-dynamodb": "^3.0.0",
-        "@aws-sdk/s3-request-presigner": "^3.0.0",
-        "parse-multipart": "^1.0.4"
+        "@aws-sdk/s3-request-presigner": "^3.0.0"
       }
     };
     fs.writeFileSync(path.join(tempDir, 'package.json'), JSON.stringify(packageJson, null, 2));
@@ -93,9 +93,6 @@ async function deployLambda() {
       CodeSize: result.CodeSize,
       Version: result.Version
     });
-    
-    // Clean up temp directory
-    fs.rmSync(tempDir, { recursive: true, force: true });
     
     return result;
     

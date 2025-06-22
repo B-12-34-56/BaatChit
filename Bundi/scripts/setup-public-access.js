@@ -68,6 +68,11 @@ const bucketPolicy = {
   ],
 };
 
+// Use environment variables instead of hardcoded credentials
+const AWS_ACCESS_KEY_ID = process.env.AWS_ACCESS_KEY_ID;
+const AWS_SECRET_ACCESS_KEY = process.env.AWS_SECRET_ACCESS_KEY;
+const AWS_SESSION_TOKEN = process.env.AWS_SESSION_TOKEN;
+
 async function checkCredentials() {
   if (!AWS_CONFIG.accessKeyId || !AWS_CONFIG.secretAccessKey) {
     console.error('❌ AWS credentials not found in environment variables');

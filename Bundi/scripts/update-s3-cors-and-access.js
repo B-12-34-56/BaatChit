@@ -10,31 +10,28 @@ const fs = require('fs');
 const path = require('path');
 const AWS = require('aws-sdk');
 
-// AWS Configuration
-const AWS_CONFIG = {
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  sessionToken: process.env.AWS_SESSION_TOKEN,
-  region: process.env.AWS_REGION || 'us-east-1',
-  bucket: process.env.AWS_S3_BUCKET,
-};
+// Use environment variables instead of hardcoded credentials
+const AWS_ACCESS_KEY_ID = process.env.AWS_ACCESS_KEY_ID;
+const AWS_SECRET_ACCESS_KEY = process.env.AWS_SECRET_ACCESS_KEY;
+const AWS_SESSION_TOKEN = process.env.AWS_SESSION_TOKEN;
+const bucket = process.env.S3_BUCKET_NAME || '';
+const region = 'us-east-1';
 
 // Initialize S3 client
 const s3Client = new S3Client({
-  region: AWS_CONFIG.region,
+  region: region,
   credentials: {
-    accessKeyId: AWS_CONFIG.accessKeyId,
-    secretAccessKey: AWS_CONFIG.secretAccessKey,
-    sessionToken: AWS_CONFIG.sessionToken,
+    accessKeyId: AWS_ACCESS_KEY_ID,
+    secretAccessKey: AWS_SECRET_ACCESS_KEY,
+    sessionToken: AWS_SESSION_TOKEN,
   }
 });
 
 // AWS SDK v2 client for compatibility
 const s3V2 = new AWS.S3({
-  region: AWS_CONFIG.region,
-  accessKeyId: AWS_CONFIG.accessKeyId,
-  secretAccessKey: AWS_CONFIG.secretAccessKey,
-  sessionToken: AWS_CONFIG.sessionToken,
+  region: region,
+  accessKeyId: AWS_ACCESS_KEY_ID,
+  secretAccessKey: AWS_SECRET_ACCESS_KEY,
 });
 
 // CORS Configuration for presigned URL uploads
@@ -98,12 +95,11 @@ const publicAccessBlockConfig = {
 };
 
 async function checkCredentials() {
-  if (!AWS_CONFIG.accessKeyId || !AWS_CONFIG.secretAccessKey) {
+  if (!AWS_ACCESS_KEY_ID || !AWS_SECRET_ACCESS_KEY) {
     console.error('❌ AWS credentials not found in environment variables');
     console.log('Please set the following environment variables:');
     console.log('  AWS_ACCESS_KEY_ID');
     console.log('  AWS_SECRET_ACCESS_KEY');
-    console.log('  AWS_SESSION_TOKEN (optional, for temporary credentials)');
     process.exit(1);
   }
   console.log('✅ AWS credentials found');
@@ -114,7 +110,7 @@ async function getCurrentCorsConfiguration() {
     console.log('🔄 Getting current CORS configuration...');
     
     const command = new GetBucketCorsCommand({
-      Bucket: process.env.AWS_S3_BUCKET || "YOUR_S3_BUCKET_NAME",
+      Bucket: bucket,
     });
     
     const response = await s3Client.send(command);
@@ -135,7 +131,7 @@ async function updateCorsConfiguration() {
     console.log('🔄 Updating CORS configuration...');
     
     const corsCommand = new PutBucketCorsCommand({
-      Bucket: process.env.AWS_S3_BUCKET || "YOUR_S3_BUCKET_NAME",
+      Bucket: bucket,
       CORSConfiguration: {
         CORSRules: corsConfig,
       },
@@ -159,7 +155,7 @@ async function getCurrentPublicAccessBlock() {
     console.log('🔄 Getting current public access block configuration...');
     
     const command = new GetPublicAccessBlockCommand({
-      Bucket: process.env.AWS_S3_BUCKET || "YOUR_S3_BUCKET_NAME",
+      Bucket: bucket,
     });
     
     const response = await s3Client.send(command);
@@ -177,7 +173,7 @@ async function updatePublicAccessBlock() {
     console.log('🔄 Updating public access block configuration...');
     
     const command = new PutPublicAccessBlockCommand({
-      Bucket: process.env.AWS_S3_BUCKET || "YOUR_S3_BUCKET_NAME",
+      Bucket: bucket,
       PublicAccessBlockConfiguration: publicAccessBlockConfig,
     });
     
@@ -270,7 +266,7 @@ async function updateBucketPolicy() {
     };
 
     const command = new PutBucketPolicyCommand({
-      Bucket: process.env.AWS_S3_BUCKET || "YOUR_S3_BUCKET_NAME",
+      Bucket: bucket,
       Policy: JSON.stringify(bucketPolicy),
     });
     
@@ -286,8 +282,8 @@ async function updateBucketPolicy() {
 async function main() {
   console.log('🚀 AWS S3 Configuration Update');
   console.log('==============================');
-  console.log(`Bucket: ${process.env.AWS_S3_BUCKET}`);
-  console.log(`Region: ${AWS_CONFIG.region}`);
+  console.log(`Bucket: ${bucket}`);
+  console.log(`Region: ${region}`);
   console.log('');
   
   try {

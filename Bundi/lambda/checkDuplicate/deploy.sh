@@ -13,6 +13,7 @@ HANDLER="index.handler"
 RUNTIME="nodejs18.x"
 TIMEOUT=30
 MEMORY_SIZE=512
+S3_BUCKET="2314823894myawsbucket"
 
 # Create deployment package
 echo "📦 Creating deployment package..."
@@ -42,7 +43,7 @@ aws lambda update-function-configuration \
     "MAX_UPLOADS":"3",
     "SIMILARITY_THRESHOLD":"25",
     "AWS_REGION":"us-east-1",
-    "S3_BUCKET":"$S3_BUCKET"
+    "S3_BUCKET":"'$S3_BUCKET'"
   }'
 
 echo "✅ Deployment complete!"
