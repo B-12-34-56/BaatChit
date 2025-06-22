@@ -15,13 +15,13 @@ const port = process.env.PORT || 4000;
 // Blocked keywords for filenames
 const BLOCKED_KEYWORDS = ['name', 'signature', 'sign', 'signed'];
 
-// AWS Configuration - using the same credentials as your React Native app
+// AWS Configuration - using environment variables only
 const AWS_CONFIG = {
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID || "YOUR_ACCESS_KEY_ID",
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || "YOUR_SECRET_ACCESS_KEY",
-  sessionToken: process.env.AWS_SESSION_TOKEN || "YOUR_SESSION_TOKEN",
+  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  sessionToken: process.env.AWS_SESSION_TOKEN,
   region: process.env.AWS_REGION || 'us-east-1',
-  bucket: process.env.AWS_BUCKET || "YOUR_S3_BUCKET_NAME"
+  bucket: process.env.AWS_BUCKET
 };
 
 const S3_SUBFOLDER = process.env.S3_SUBFOLDER || 'images/';
@@ -40,8 +40,7 @@ const s3Client = new S3Client({
     accessKeyId: AWS_CONFIG.accessKeyId,
     secretAccessKey: AWS_CONFIG.secretAccessKey,
     sessionToken: AWS_CONFIG.sessionToken,
-  },
-  bucket: AWS_CONFIG.bucket
+  }
 });
 
 /**

@@ -42,7 +42,7 @@ aws lambda update-function-configuration \
     "MAX_UPLOADS":"3",
     "SIMILARITY_THRESHOLD":"25",
     "AWS_REGION":"us-east-1",
-    "S3_BUCKET":"YOUR_S3_BUCKET_NAME"
+    "S3_BUCKET":"$S3_BUCKET"
   }'
 
 echo "✅ Deployment complete!"

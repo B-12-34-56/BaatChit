@@ -1,9 +1,10 @@
 // Upload Service - Sends single JSON payload to API
 import { awsConfig } from '../utils/aws';
 
-// Get API URL from centralized AWS config
-const API_URL = awsConfig.apiGateway.upload.url;
-const API_KEY = awsConfig.apiGateway.upload.apiKey;
+// Get API URL from centralized AWS config - use the checkDuplicate endpoint instead
+const API_URL = process.env.REACT_APP_LAMBDA_CHECK_DUPLICATE || 'https://np39lyhj20.execute-api.us-east-1.amazonaws.com/Deployment/check-duplicate';
+// Use the correct API key for the check-duplicate endpoint
+const API_KEY = process.env.AWS_UPLOAD_API_KEY;
 
 // Debug configuration
 console.log('🔧 [uploadService] Configuration:', {
@@ -25,63 +26,66 @@ console.log('🔧 [uploadService] Configuration:', {
  */
 export const uploadImage = async ({ image, filename, fileHash, contentType, userId }) => {
   try {
+    // Fix content type if it's just "image"
+    let finalContentType = contentType;
+    if (contentType === 'image') {
+      if (filename.toLowerCase().endsWith('.png')) {
+        finalContentType = 'image/png';
+      } else if (filename.toLowerCase().endsWith('.jpg') || filename.toLowerCase().endsWith('.jpeg')) {
+        finalContentType = 'image/jpeg';
+      } else if (filename.toLowerCase().endsWith('.gif')) {
+        finalContentType = 'image/gif';
+      } else if (filename.toLowerCase().endsWith('.webp')) {
+        finalContentType = 'image/webp';
+      } else {
+        finalContentType = 'image/jpeg';
+      }
+    }
+
     console.log('📤 [uploadService] Starting upload...', {
       filename,
       fileHash: fileHash?.substring(0, 12) + '...',
-      contentType,
-      userId,
-      apiUrl: API_URL ? 'configured' : 'missing'
+      contentType: finalContentType,
+      userId
     });
 
-    // Check if API URL is configured
-    if (!API_URL) {
-      throw new Error('Upload API URL not configured in AWS config');
-    }
-
-    // Send the correct payload structure
-    const payload = { 
-      image, 
-      filename, 
-      fileHash, 
-      imageHash: fileHash,
-      contentType: contentType === 'image' ? 'image/png' : contentType, 
-      userId 
-    };
-    
     const response = await fetch(API_URL, {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
         'x-api-key': API_KEY
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ 
+        imageData: image,  // Use 'imageData' as expected by checkDuplicate Lambda
+        filename: filename,  // Use 'filename' as expected by checkDuplicate Lambda
+        fileHash: fileHash,  // Use 'fileHash' as expected by checkDuplicate Lambda
+        contentType: finalContentType, 
+        userId: userId 
+      }),
     });
+
+    console.log('📥 [uploadService] Response status:', response.status);
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('❌ [uploadService] Upload failed:', response.status, errorText);
+      console.error('❌ [uploadService] HTTP error:', response.status, errorText);
       throw new Error(`Upload failed: ${response.status} ${errorText}`);
     }
 
     const result = await response.json();
     
-    // Handle cases where the lambda returns an error in a 200 OK response
-    if (result.body && typeof result.body === 'string') {
-      try {
-        const parsedBody = JSON.parse(result.body);
-        if (parsedBody.error) {
-          throw new Error(`Lambda returned error: ${parsedBody.error}`);
-        }
-      } catch (e) {
-        // Not a JSON error body, proceed
-      }
+    console.log('📥 [uploadService] Response parsed:', {
+      success: result.success,
+      hasImageUrl: !!result.imageUrl,
+      blocked: result.blocked,
+      totalCount: result.totalCount
+    });
+    
+    // Warn if required fields are missing
+    if (typeof result.success === 'undefined' || typeof result.imageUrl === 'undefined') {
+      console.warn('⚠️ [uploadService] Response missing required fields:', result);
     }
     
-    console.log('✅ [uploadService] Upload successful:', {
-      success: result.success,
-      imageUrl: result.imageUrl?.substring(0, 50) + '...'
-    });
-
     return result;
   } catch (error) {
     console.error('❌ [uploadService] Error:', error);

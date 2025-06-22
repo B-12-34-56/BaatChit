@@ -2,7 +2,7 @@
     "Version": "2012-10-17",
     "Statement": [
         {
-            "Sid": "AllowPublicReadAccess",
+            "Sid": "PublicReadGetObject",
             "Effect": "Allow",
             "Principal": "*",
             "Action": "s3:GetObject",
@@ -12,23 +12,40 @@
             "Sid": "AllowAuthenticatedUploads",
             "Effect": "Allow",
             "Principal": {
-                "AWS": "arn:aws:iam::YOUR_ACCOUNT_ID:user/YOUR_IAM_USER"
+                "AWS": "arn:aws:iam::339874238091:user/ibrahim"
             },
             "Action": [
                 "s3:PutObject",
                 "s3:PutObjectAcl"
             ],
-            "Resource": "arn:aws:s3:::YOUR_S3_BUCKET_NAME/images/*"
+            "Resource": "arn:aws:s3:::2314823894myawsbucket/images/*"
         },
         {
             "Sid": "AllowPresignedUrlUploads",
             "Effect": "Allow",
             "Principal": "*",
             "Action": "s3:PutObject",
-            "Resource": "arn:aws:s3:::YOUR_S3_BUCKET_NAME/images/*",
+            "Resource": "arn:aws:s3:::2314823894myawsbucket/images/*",
             "Condition": {
                 "StringEquals": {
                     "s3:x-amz-acl": "public-read"
+                }
+            }
+        },
+        {
+            "Sid": "AllowLambdaUploads",
+            "Effect": "Allow",
+            "Principal": {
+                "Service": "lambda.amazonaws.com"
+            },
+            "Action": [
+                "s3:PutObject",
+                "s3:PutObjectAcl"
+            ],
+            "Resource": "arn:aws:s3:::YOUR_S3_BUCKET_NAME/images/*",
+            "Condition": {
+                "StringEquals": {
+                    "aws:SourceAccount": "YOUR_ACCOUNT_ID"
                 }
             }
         }

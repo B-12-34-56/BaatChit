@@ -17,32 +17,31 @@ You need to provide the actual AWS credentials. The upload will fail until you s
 Set these environment variables in your app:
 
 ```bash
-export AWS_ACCESS_KEY_ID="your-actual-access-key-id"
-export AWS_SECRET_ACCESS_KEY="your-actual-secret-access-key"
-```
+export AWS_ACCESS_KEY_ID="YOUR_AWS_ACCESS_KEY_ID"
+export AWS_SECRET_ACCESS_KEY="YOUR_AWS_SECRET_ACCESS_KEY"
+export AWS_SESSION_TOKEN="YOUR_AWS_SESSION_TOKEN"
 
-### Option 2: Expo Config (Alternative)
-Add to your `app.config.js` or `app.json`:
+# S3 Configuration
+export AWS_S3_BUCKET="YOUR_S3_BUCKET_NAME"
+export AWS_S3_BASE_URL="https://YOUR_S3_BUCKET_NAME.s3.us-east-1.amazonaws.com/images/"
 
-```javascript
-export default {
-  expo: {
-    // ... other config
-    extra: {
-      AWS_ACCESS_KEY_ID: "your-actual-access-key-id",
-      AWS_SECRET_ACCESS_KEY: "your-actual-secret-access-key",
-    },
-  },
-};
-```
+# API Gateway URLs and Keys
+export AWS_UPLOAD_API_URL="https://YOUR_API_GATEWAY_URL/Deployment/upload-image"
+export AWS_UPLOAD_API_KEY="YOUR_UPLOAD_API_KEY"
+export AWS_GETTAG_API_URL="https://YOUR_API_GATEWAY_URL/Stage1/get-tag"
+export AWS_GETTAG_API_KEY="YOUR_GETTAG_API_KEY"
+export AWS_BLOCKIMAGE_API_URL="https://YOUR_API_GATEWAY_URL/Stage1/block-image"
+export AWS_BLOCKIMAGE_API_KEY="YOUR_BLOCKIMAGE_API_KEY"
 
-### Option 3: Direct in Code (Not Recommended for Production)
-If you want to test quickly, you can temporarily add the credentials directly in `src/utils/aws.js`:
+# Cognito Configuration
+export AWS_COGNITO_USER_POOL_ID="YOUR_COGNITO_USER_POOL_ID"
+export AWS_COGNITO_USER_POOL_CLIENT_ID="YOUR_COGNITO_USER_POOL_CLIENT_ID"
+export AWS_COGNITO_IDENTITY_POOL_ID="YOUR_COGNITO_IDENTITY_POOL_ID"
 
-```javascript
-aws_access_key_id: getEnv('AWS_ACCESS_KEY_ID', 'YOUR_ACTUAL_ACCESS_KEY'),
-aws_secret_access_key: getEnv('AWS_SECRET_ACCESS_KEY', 'YOUR_ACTUAL_SECRET_KEY'),
-```
+# DynamoDB Configuration
+export DYNAMODB_TABLE="ImageSignatures"
+export AWS_DYNAMODB_ENDPOINT="https://YOUR_API_GATEWAY_URL/Stage1"
+export AWS_GETTAG_API_GATEWAY="https://YOUR_API_GATEWAY_URL/GetTag1"
 
 ## 🔍 **How to Get AWS Credentials:**
 
@@ -82,6 +81,7 @@ Once you add the credentials, try uploading an image. You should see logs like:
 
 ## ⚠️ **Security Note:**
 
-- Never commit AWS credentials to version control
-- Use environment variables or secure credential management
-- Consider using AWS Cognito Identity Pool for temporary credentials in production 
+- Never commit credentials to version control
+- Use environment variables or AWS IAM roles
+- Rotate credentials regularly
+- Use least privilege principle for IAM policies 

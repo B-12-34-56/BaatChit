@@ -355,8 +355,7 @@ exports.handler = async (event) => {
   }
 };
 
-
-// --- HELPER FUNCTIONS (Restored) ---
+// --- HELPER FUNCTIONS ---
 
 const generatePresignedUrl = async (fileHash, fileName, contentType, userId) => {
   const timestamp = Date.now();

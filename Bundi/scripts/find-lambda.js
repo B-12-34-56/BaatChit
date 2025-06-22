@@ -4,16 +4,17 @@ const { LambdaClient } = require('@aws-sdk/client-lambda');
 // Configure AWS
 AWS.config.update({
   region: 'us-east-1',
-  accessKeyId: 'ASIA2YQ7Q52FQVGK7NR6',
-  secretAccessKey: 'Gj6RvYYoS30yZEJ6BVIhle/SeooqG7MKfJRF84AD'
+  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  sessionToken: process.env.AWS_SESSION_TOKEN
 });
 
 const lambda = new LambdaClient({
   region: 'us-east-1',
   credentials: {
-    accessKeyId: 'YOUR_ACCESS_KEY_ID',
-    secretAccessKey: 'YOUR_SECRET_ACCESS_KEY',
-    sessionToken: 'YOUR_SESSION_TOKEN'
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    sessionToken: process.env.AWS_SESSION_TOKEN
   }
 });
 const apigateway = new AWS.APIGateway();

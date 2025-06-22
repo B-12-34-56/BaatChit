@@ -11,6 +11,49 @@ import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import * as FileSystem from 'expo-file-system';
 import * as ImageManipulator from 'expo-image-manipulator';
 
+// Centralized API client with retry logic
+export const api = {
+  baseURL: process.env.REACT_APP_LAMBDA_BASE_URL || 'https://np39lyhj20.execute-api.us-east-1.amazonaws.com/Deployment',
+  apiKey: process.env.AWS_UPLOAD_API_KEY,
+  timeout: 15000,
+  
+  async request(endpoint, options = {}) {
+    const url = `${this.baseURL}${endpoint}`;
+    const config = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': this.apiKey,
+        ...options.headers,
+      },
+      timeout: this.timeout,
+      ...options,
+    };
+
+    try {
+      const response = await fetch(url, config);
+      
+      if (response.status === 403) {
+        throw new Error('Auth token missing – check API key or stage name');
+      }
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      return await response.json();
+    } catch (error) {
+      console.error(`API request failed for ${endpoint}:`, error);
+      throw error;
+    }
+  },
+  
+  async checkDuplicate(payload) {
+    return this.request('/check-duplicate', {
+      body: JSON.stringify(payload),
+    });
+  }
+};
 
 // ─────────────────────────
 //  AWS CONFIGURATION
@@ -18,28 +61,28 @@ import * as ImageManipulator from 'expo-image-manipulator';
 
 
 const awsConfig = {
- accessKeyId: process.env.AWS_ACCESS_KEY_ID || "YOUR_ACCESS_KEY_ID",
- secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || "YOUR_SECRET_ACCESS_KEY",
- sessionToken: process.env.AWS_SESSION_TOKEN || "YOUR_SESSION_TOKEN",
+ accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+ secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+ sessionToken: process.env.AWS_SESSION_TOKEN,
  region: process.env.AWS_REGION || 'us-east-1',
   s3: {
-   bucketName: process.env.AWS_S3_BUCKET || "YOUR_S3_BUCKET_NAME",
-   region: "us-east-1",
+   bucketName: process.env.AWS_S3_BUCKET,
+   region: process.env.AWS_REGION || "us-east-1",
    imagesPath: "images/",
-   baseURL: process.env.AWS_S3_BASE_URL || "https://YOUR_S3_BUCKET_NAME.s3.us-east-1.amazonaws.com/images/",
+   baseURL: process.env.AWS_S3_BASE_URL,
  },
   apiGateway: {
    upload: {
-     url: process.env.AWS_UPLOAD_API_URL || "https://YOUR_API_GATEWAY_ID.execute-api.us-east-1.amazonaws.com/Deployment/upload-image",
-     apiKey: process.env.AWS_UPLOAD_API_KEY || "YOUR_UPLOAD_API_KEY",
+     url: process.env.AWS_UPLOAD_API_URL,
+     apiKey: process.env.AWS_UPLOAD_API_KEY,
    },
    getTag: {
-     url: process.env.AWS_GETTAG_API_URL || "https://YOUR_API_GATEWAY_ID.execute-api.us-east-1.amazonaws.com/Stage1/get-tag",
-     apiKey: process.env.AWS_GETTAG_API_KEY || "YOUR_GETTAG_API_KEY",
+     url: process.env.AWS_GETTAG_API_URL,
+     apiKey: process.env.AWS_GETTAG_API_KEY,
    },
    blockImage: {
-     url: process.env.AWS_BLOCKIMAGE_API_URL || "https://YOUR_API_GATEWAY_ID.execute-api.us-east-1.amazonaws.com/Stage1/block-image",
-     apiKey: process.env.AWS_BLOCKIMAGE_API_KEY || "YOUR_BLOCKIMAGE_API_KEY",
+     url: process.env.AWS_BLOCKIMAGE_API_URL,
+     apiKey: process.env.AWS_BLOCKIMAGE_API_KEY,
    },
  },
   lambda: {
@@ -51,11 +94,11 @@ const awsConfig = {
        timeout: 30,
        memorySize: 256,
        environment: {
-         AWS_REGION: 'us-east-1',
-         AWS_BUCKET: process.env.AWS_S3_BUCKET || 'YOUR_S3_BUCKET_NAME',
+         AWS_REGION: process.env.AWS_REGION || 'us-east-1',
+         AWS_BUCKET: process.env.AWS_S3_BUCKET,
          S3_IMAGES_PATH: 'images/',
-         DYNAMODB_TABLE: 'ImageSignatures',
-         DYNAMODB_REGION: 'us-east-1'
+         DYNAMODB_TABLE: process.env.DYNAMODB_TABLE || 'ImageSignatures',
+         DYNAMODB_REGION: process.env.AWS_REGION || 'us-east-1'
        },
        dependencies: [
          '@aws-sdk/client-s3',
@@ -73,22 +116,22 @@ const awsConfig = {
      }
    },
    deployment: {
-     region: 'us-east-1',
+     region: process.env.AWS_REGION || 'us-east-1',
      zipFileName: 'lambda-deployment.zip',
      sourceDir: 'src/lambdaHandlers'
    }
  },
   dynamoDB: {
    tableName: process.env.DYNAMODB_TABLE || "ImageSignatures",
-   region: "us-east-1",
-   endpoint: process.env.AWS_DYNAMODB_ENDPOINT || "https://YOUR_API_GATEWAY_ID.execute-api.us-east-1.amazonaws.com/Stage1",
-   getTagApiGateway: process.env.AWS_GETTAG_API_GATEWAY || "https://YOUR_API_GATEWAY_ID.execute-api.us-east-1.amazonaws.com/GetTag1",
+   region: process.env.AWS_REGION || "us-east-1",
+   endpoint: process.env.AWS_DYNAMODB_ENDPOINT,
+   getTagApiGateway: process.env.AWS_GETTAG_API_GATEWAY,
  },
   cognito: {
-   userPoolId: process.env.AWS_COGNITO_USER_POOL_ID || "YOUR_USER_POOL_ID",
-   userPoolClientId: process.env.AWS_COGNITO_USER_POOL_CLIENT_ID || "YOUR_USER_POOL_CLIENT_ID",
-   identityPoolId: process.env.AWS_COGNITO_IDENTITY_POOL_ID || "YOUR_IDENTITY_POOL_ID",
-   region: "us-east-1",
+   userPoolId: process.env.AWS_COGNITO_USER_POOL_ID,
+   userPoolClientId: process.env.AWS_COGNITO_USER_POOL_CLIENT_ID,
+   identityPoolId: process.env.AWS_COGNITO_IDENTITY_POOL_ID,
+   region: process.env.AWS_REGION || "us-east-1",
  },
   app: {
    defaultTTLInDays: 30,
@@ -117,9 +160,11 @@ const s3Client = new S3Client({
  credentials: awsConfig.accessKeyId && awsConfig.secretAccessKey ? {
    accessKeyId: awsConfig.accessKeyId,
    secretAccessKey: awsConfig.secretAccessKey,
+   sessionToken: awsConfig.sessionToken,
  } : process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY ? {
    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+   sessionToken: process.env.AWS_SESSION_TOKEN,
  } : fromCognitoIdentityPool({
    client: new CognitoIdentityProviderClient({ region: awsConfig.cognito.region }),
    identityPoolId: awsConfig.cognito.identityPoolId,
@@ -133,9 +178,11 @@ const dynamoDbClient = new DynamoDBClient({
  credentials: awsConfig.accessKeyId && awsConfig.secretAccessKey ? {
    accessKeyId: awsConfig.accessKeyId,
    secretAccessKey: awsConfig.secretAccessKey,
+   sessionToken: awsConfig.sessionToken,
  } : process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY ? {
    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+   sessionToken: process.env.AWS_SESSION_TOKEN,
  } : fromCognitoIdentityPool({
    client: new CognitoIdentityProviderClient({ region: awsConfig.cognito.region }),
    identityPoolId: awsConfig.cognito.identityPoolId,

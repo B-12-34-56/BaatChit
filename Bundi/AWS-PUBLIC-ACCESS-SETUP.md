@@ -20,9 +20,14 @@ This guide will help you configure your AWS S3 bucket (`YOUR_S3_BUCKET_NAME`) fo
 Set your AWS credentials as environment variables:
 
 ```bash
-export AWS_ACCESS_KEY_ID="your-access-key-id"
-export AWS_SECRET_ACCESS_KEY="your-secret-access-key"
-export AWS_SESSION_TOKEN="your-session-token"  # Optional, for temporary credentials
+export AWS_ACCESS_KEY_ID="YOUR_AWS_ACCESS_KEY_ID"
+export AWS_SECRET_ACCESS_KEY="YOUR_AWS_SECRET_ACCESS_KEY"
+export AWS_SESSION_TOKEN="YOUR_AWS_SESSION_TOKEN"  # Optional, for temporary credentials
+export AWS_REGION="us-east-1"
+
+# S3 Configuration
+export AWS_S3_BUCKET="YOUR_S3_BUCKET_NAME"
+export AWS_S3_BASE_URL="https://YOUR_S3_BUCKET_NAME.s3.us-east-1.amazonaws.com/images/"
 ```
 
 ## 🔧 Step 2: Install Dependencies
@@ -59,7 +64,7 @@ If you prefer to configure manually through the AWS Console:
 [
     {
         "AllowedHeaders": ["*"],
-        "AllowedMethods": ["GET", "PUT", "POST", "DELETE"],
+        "AllowedMethods": ["GET", "PUT", "POST", "DELETE", "HEAD"],
         "AllowedOrigins": ["*"],
         "ExposeHeaders": ["ETag"],
         "MaxAgeSeconds": 3000
@@ -76,33 +81,38 @@ If you prefer to configure manually through the AWS Console:
     "Version": "2012-10-17",
     "Statement": [
         {
-            "Sid": "AllowPublicReadAccess",
+            "Sid": "PublicReadGetObject",
             "Effect": "Allow",
             "Principal": "*",
             "Action": "s3:GetObject",
             "Resource": "arn:aws:s3:::YOUR_S3_BUCKET_NAME/images/*"
         },
         {
-            "Sid": "AllowAuthenticatedUploads",
+            "Sid": "AllowPresignedUploads",
             "Effect": "Allow",
             "Principal": {
-                "AWS": "arn:aws:iam::YOUR_ACCOUNT_ID:root"
+                "AWS": "arn:aws:iam::YOUR_ACCOUNT_ID:user/YOUR_IAM_USER"
             },
             "Action": [
                 "s3:PutObject",
                 "s3:PutObjectAcl"
             ],
-            "Resource": "arn:aws:s3:::YOUR_S3_BUCKET_NAME/*"
+            "Resource": "arn:aws:s3:::YOUR_S3_BUCKET_NAME/images/*"
         },
         {
-            "Sid": "AllowPresignedUrlUploads",
+            "Sid": "AllowLambdaUploads",
             "Effect": "Allow",
-            "Principal": "*",
-            "Action": "s3:PutObject",
-            "Resource": "arn:aws:s3:::YOUR_S3_BUCKET_NAME/*",
+            "Principal": {
+                "Service": "lambda.amazonaws.com"
+            },
+            "Action": [
+                "s3:PutObject",
+                "s3:PutObjectAcl"
+            ],
+            "Resource": "arn:aws:s3:::YOUR_S3_BUCKET_NAME/images/*",
             "Condition": {
                 "StringEquals": {
-                    "s3:x-amz-acl": "public-read"
+                    "aws:SourceAccount": "YOUR_ACCOUNT_ID"
                 }
             }
         }

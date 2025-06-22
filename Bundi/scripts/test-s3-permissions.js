@@ -1,17 +1,15 @@
 const AWS = require('aws-sdk');
 const { S3Client } = require('@aws-sdk/client-s3');
 
-// Configure AWS with the same credentials
-const s3Client = new S3Client({
+// Configure AWS
+const s3Client = new AWS.S3({
   region: 'us-east-1',
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID || "YOUR_ACCESS_KEY_ID",
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || "YOUR_SECRET_ACCESS_KEY",
-    sessionToken: process.env.AWS_SESSION_TOKEN || "YOUR_SESSION_TOKEN",
-  }
+  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  sessionToken: process.env.AWS_SESSION_TOKEN,
 });
 
-const bucketName = 'YOUR_S3_BUCKET_NAME';
+const bucketName = process.env.AWS_S3_BUCKET;
 
 async function testS3Permissions() {
   try {

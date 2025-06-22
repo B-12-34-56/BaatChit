@@ -4,18 +4,18 @@ const { S3Client } = require('@aws-sdk/client-s3');
 // Configure AWS with the same credentials
 AWS.config.update({
   region: 'us-east-1',
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID || "YOUR_ACCESS_KEY_ID",
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || "YOUR_SECRET_ACCESS_KEY",
-  sessionToken: process.env.AWS_SESSION_TOKEN || "YOUR_SESSION_TOKEN",
+  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  sessionToken: process.env.AWS_SESSION_TOKEN,
 });
 
 const lambda = new AWS.Lambda();
 const s3Client = new S3Client({
   region: 'us-east-1',
   credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID || "YOUR_ACCESS_KEY_ID",
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || "YOUR_SECRET_ACCESS_KEY",
-    sessionToken: process.env.AWS_SESSION_TOKEN || "YOUR_SESSION_TOKEN",
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    sessionToken: process.env.AWS_SESSION_TOKEN,
   }
 });
 

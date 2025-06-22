@@ -12,33 +12,30 @@ const AWS = require('aws-sdk');
 
 // AWS Configuration
 const AWS_CONFIG = {
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID || "ASIA2YQ7Q52F45WDIJWV",
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || "GL8mMJ6vVAdU2mzeq5XsaKXmVZZ3F31KQ08Ro2aG",
+  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  sessionToken: process.env.AWS_SESSION_TOKEN,
   region: process.env.AWS_REGION || 'us-east-1',
-  bucket: process.env.AWS_S3_BUCKET || "2314823894myawsbucket",
+  bucket: process.env.AWS_S3_BUCKET,
 };
 
 // Initialize S3 client
 const s3Client = new S3Client({
-  region: 'us-east-1',
+  region: AWS_CONFIG.region,
   credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID || "YOUR_ACCESS_KEY_ID",
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || "YOUR_SECRET_ACCESS_KEY",
-    sessionToken: process.env.AWS_SESSION_TOKEN || "YOUR_SESSION_TOKEN",
+    accessKeyId: AWS_CONFIG.accessKeyId,
+    secretAccessKey: AWS_CONFIG.secretAccessKey,
+    sessionToken: AWS_CONFIG.sessionToken,
   }
 });
 
-const s3Config = {
-  region: 'us-east-1',
-  bucket: process.env.AWS_S3_BUCKET || "YOUR_S3_BUCKET_NAME",
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID || "YOUR_ACCESS_KEY_ID",
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || "YOUR_SECRET_ACCESS_KEY",
-    sessionToken: process.env.AWS_SESSION_TOKEN || "YOUR_SESSION_TOKEN",
-  }
-};
-
-const s3 = new AWS.S3(s3Config);
+// AWS SDK v2 client for compatibility
+const s3V2 = new AWS.S3({
+  region: AWS_CONFIG.region,
+  accessKeyId: AWS_CONFIG.accessKeyId,
+  secretAccessKey: AWS_CONFIG.secretAccessKey,
+  sessionToken: AWS_CONFIG.sessionToken,
+});
 
 // CORS Configuration for presigned URL uploads
 const corsConfig = [

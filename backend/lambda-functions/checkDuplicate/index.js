@@ -3,23 +3,16 @@
 // ===========================
 // NO Firebase dependencies - runs entirely on AWS
 
-const AWS = require('aws-sdk');
+const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
+const { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand, ScanCommand } = require('@aws-sdk/lib-dynamodb');
+const { S3Client, DeleteObjectCommand, PutObjectCommand } = require('@aws-sdk/client-s3');
 const sharp = require('sharp');
 const { generateRobustHash, compareHashes, binaryToHex } = require('./imageHash');
-const { PutObjectCommand } = require('@aws-sdk/client-s3');
-
-// AWS Configuration with proper region
-AWS.config.update({
-  region: process.env.AWS_REGION || 'us-east-1'
-});
 
 // AWS Services - NO Firebase
-const dynamodb = new AWS.DynamoDB.DocumentClient({
-  region: process.env.AWS_REGION || 'us-east-1'
-});
-const s3 = new AWS.S3({
-  region: process.env.AWS_REGION || 'us-east-1'
-});
+const dynamoClient = new DynamoDBClient({ region: process.env.AWS_REGION || 'us-east-1' });
+const dynamodb = DynamoDBDocumentClient.from(dynamoClient);
+const s3Client = new S3Client({ region: process.env.AWS_REGION || 'us-east-1' });
 
 // Configuration
 const IMAGES_TABLE = process.env.IMAGES_TABLE || 'ImageSignatures';
@@ -39,7 +32,7 @@ async function findSimilarImages(hashData, threshold = SIMILARITY_THRESHOLD) {
       TableName: IMAGES_TABLE
     };
     
-    const result = await dynamodb.scan(params).promise();
+    const result = await dynamodb.send(new ScanCommand(params));
     const similar = [];
     
     console.log(`🔍 Scanning ${result.Items.length} images for similarities...`);
@@ -118,55 +111,30 @@ async function calculateTotalUploadCount(hashData, baseCount = 0) {
 // ===========================
 
 exports.handler = async (event) => {
-  console.log('AWS Lambda processing image upload');
+  console.log('🔍 [checkDuplicate] Lambda processing image upload');
+  console.log('🔍 [checkDuplicate] Event:', JSON.stringify(event, null, 2));
   
   try {
     let imageBuffer, userId, fileName, fileHash;
     
-    // Handle API Gateway request (pre-upload check)
-    if (event.httpMethod === 'POST') {
-      const body = JSON.parse(event.body);
-      
-      if (!body.imageData) {
-        return {
-          statusCode: 400,
-          headers: { 
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*'
-          },
-          body: JSON.stringify({ 
-            error: 'No image data provided',
-            success: false,
-            blocked: false,
-            totalCount: 0,
-            uploadCount: 0,
-            imageUrl: null,
-            perceptualHash: null,
-            similarImages: 0,
-            message: 'No image data provided'
-          })
-        };
-      }
-      
-      imageBuffer = Buffer.from(body.imageData, 'base64');
-      userId = body.userId || 'anonymous';
-      fileName = body.fileName || 'unnamed.jpg';
-      fileHash = body.fileHash || null; // SHA-256 from client
-    }
-    // Handle S3 trigger (post-upload processing)
-    else if (event.Records && event.Records[0].s3) {
-      const s3Event = event.Records[0].s3;
-      const bucket = s3Event.bucket.name;
-      const key = decodeURIComponent(s3Event.object.key.replace(/\+/g, ' '));
-      
-      // Download image from S3
-      const s3Object = await s3.getObject({ Bucket: bucket, Key: key }).promise();
-      imageBuffer = s3Object.Body;
-      userId = s3Object.Metadata?.userid || 'anonymous';
-      fileName = key;
-      fileHash = s3Object.Metadata?.filehash || null;
-    }
-    else {
+    // Extract fields from the request
+    const { imageData, fileHash: eventFileHash, userId: eventUserId, fileName: eventFileName } = event.body ? JSON.parse(event.body) : event;
+    
+    console.log('🔍 [checkDuplicate] Extracted fields:', {
+      hasImageData: !!imageData,
+      imageDataLength: imageData ? imageData.length : 0,
+      fileHash: eventFileHash?.substring(0, 12) + '...',
+      userId: eventUserId,
+      fileName: eventFileName
+    });
+    
+    // Validate required fields
+    if (!imageData || !eventUserId || !eventFileName) {
+      console.error('❌ [checkDuplicate] Missing required fields:', { 
+        hasImageData: !!imageData, 
+        userId: eventUserId, 
+        fileName: eventFileName 
+      });
       return {
         statusCode: 400,
         headers: { 
@@ -174,25 +142,29 @@ exports.handler = async (event) => {
           'Access-Control-Allow-Origin': '*'
         },
         body: JSON.stringify({ 
-          error: 'Invalid event type',
           success: false,
           blocked: false,
           totalCount: 0,
           uploadCount: 0,
           imageUrl: null,
           perceptualHash: null,
-          similarImages: 0,
-          message: 'Invalid event type'
+          similarImages: [],
+          message: 'Missing required fields'
         })
       };
     }
     
+    imageBuffer = Buffer.from(imageData, 'base64');
+    userId = eventUserId;
+    fileName = eventFileName;
+    fileHash = eventFileHash; // Use the hash provided by client
+    
     // Generate enhanced perceptual hash (visual fingerprint)
-    console.log('🔍 Generating robust perceptual hash...');
+    console.log('🔍 [checkDuplicate] Generating robust perceptual hash...');
     const hashData = await generateRobustHash(imageBuffer);
     const perceptualHash = hashData.perceptualHash; // This is already in hex format
     
-    console.log('✅ Perceptual hash generated:', {
+    console.log('✅ [checkDuplicate] Perceptual hash generated:', {
       perceptualHash: perceptualHash.substring(0, 16) + '...',
       averageHashLength: hashData.averageHash?.length || 0,
       dctHashLength: hashData.dctHash?.length || 0,
@@ -200,10 +172,10 @@ exports.handler = async (event) => {
     });
     
     // Check if this exact image already exists
-    const existingItem = await dynamodb.get({
+    const existingItem = await dynamodb.send(new GetCommand({
       TableName: IMAGES_TABLE,
       Key: { perceptualHash: perceptualHash }
-    }).promise();
+    }));
     
     let uploadCount = 0;
     let blocked = false;
@@ -226,15 +198,15 @@ exports.handler = async (event) => {
         // If S3 triggered and blocked, delete the file
         if (event.Records) {
           const s3Event = event.Records[0].s3;
-          await s3.deleteObject({
+          await s3Client.send(new DeleteObjectCommand({
             Bucket: s3Event.bucket.name,
             Key: decodeURIComponent(s3Event.object.key.replace(/\+/g, ' '))
-          }).promise();
+          }));
           console.log('🗑️ Deleted blocked image from S3');
         }
       } else {
         // Increment count for exact match
-        await dynamodb.update({
+        await dynamodb.send(new UpdateCommand({
           TableName: IMAGES_TABLE,
           Key: { perceptualHash: perceptualHash },
           UpdateExpression: 'SET uploadCount = uploadCount + :inc, lastUpload = :time, uploads = list_append(uploads, :upload)',
@@ -247,7 +219,7 @@ exports.handler = async (event) => {
               timestamp: new Date().toISOString()
             }]
           }
-        }).promise();
+        }));
         
         uploadCount++;
         message = `Image uploaded successfully. This exact image has now been uploaded ${uploadCount} time(s).`;
@@ -265,15 +237,15 @@ exports.handler = async (event) => {
         // If S3 triggered and blocked, delete the file
         if (event.Records) {
           const s3Event = event.Records[0].s3;
-          await s3.deleteObject({
+          await s3Client.send(new DeleteObjectCommand({
             Bucket: s3Event.bucket.name,
             Key: decodeURIComponent(s3Event.object.key.replace(/\+/g, ' '))
-          }).promise();
+          }));
           console.log('🗑️ Deleted blocked image from S3');
         }
       } else {
         // Store all hash components in DynamoDB
-        await dynamodb.put({
+        await dynamodb.send(new PutCommand({
           TableName: IMAGES_TABLE,
           Item: {
             perceptualHash: perceptualHash,
@@ -290,7 +262,7 @@ exports.handler = async (event) => {
               timestamp: new Date().toISOString()
             }]
           }
-        }).promise();
+        }));
         
         uploadCount = 1;
         message = 'New image uploaded successfully.';
@@ -300,6 +272,14 @@ exports.handler = async (event) => {
     
     // Calculate total count for response
     const totalCount = uploadCount + similarImages.reduce((sum, img) => sum + (img.uploadCount || 0), 0);
+    
+    console.log('✅ [checkDuplicate] Processing complete:', {
+      blocked,
+      uploadCount,
+      totalCount,
+      similarImages: similarImages.length,
+      message
+    });
     
     // For API Gateway response
     if (event.httpMethod === 'POST') {
@@ -313,62 +293,76 @@ exports.handler = async (event) => {
           body: JSON.stringify({
             success: false,
             blocked: true,
-            totalCount: totalCount || 0,
-            uploadCount: uploadCount || 0,
+            totalCount: totalCount,
+            uploadCount: uploadCount,
             imageUrl: null,
-            perceptualHash: perceptualHash || null,
-            similarImages: similarImages.length || 0,
-            message: message || 'Image blocked'
+            perceptualHash: perceptualHash,
+            similarImages: similarImages,
+            message: message
           })
         };
       } else {
-        // Generate pre-signed URL for upload
-        const uploadKey = `images/${perceptualHash}_${Date.now()}.jpg`;
-        const uploadUrl = await s3.getSignedUrlPromise('putObject', {
-          Bucket: process.env.S3_BUCKET || '2314823894myawsbucket',
-          Key: uploadKey,
-          Expires: 300,
-          ContentType: 'image/jpeg'
-        });
+        // Direct upload to S3 (since we have the image data)
+        const uploadKey = `images/${userId}/${perceptualHash}_${Date.now()}.jpg`;
         
-        // Upload the image directly to S3
-        await s3Client.send(new PutObjectCommand({
-          Bucket: process.env.S3_BUCKET,
-          Key: uploadKey,
-          Body: imageBuffer,
-          ContentType: 'image/jpeg',
-          Metadata: {
-            fileHash: fileHash || '',
-            userId: userId || 'anonymous',
-            uploadTimestamp: Date.now().toString(),
-            originalFilename: fileName,
-            perceptualHash: perceptualHash
-          }
-        }));
-        
-        console.log('✅ [checkDuplicate] Image uploaded to S3:', uploadKey);
-        
-        // Generate public URL for the uploaded image
-        imageUrl = `https://${process.env.S3_BUCKET}.s3.${process.env.AWS_REGION || 'us-east-1'}.amazonaws.com/${uploadKey}`;
-        
-        return {
-          statusCode: 200,
-          headers: { 
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*'
-          },
-          body: JSON.stringify({
-            success: true,
-            blocked: false,
-            totalCount: totalCount || 1,
-            uploadCount: uploadCount || 1,
-            imageUrl: imageUrl || null,
-            uploadUrl: uploadUrl || null,
-            perceptualHash: perceptualHash || null,
-            similarImages: similarImages.length || 0,
-            message: message || 'Upload successful'
-          })
-        };
+        try {
+          // Upload the image directly to S3
+          await s3Client.send(new PutObjectCommand({
+            Bucket: process.env.S3_BUCKET,
+            Key: uploadKey,
+            Body: imageBuffer,
+            ContentType: 'image/jpeg',
+            Metadata: {
+              fileHash: fileHash || '',
+              userId: userId || 'anonymous',
+              uploadTimestamp: Date.now().toString(),
+              originalFilename: fileName,
+              perceptualHash: perceptualHash
+            }
+          }));
+          
+          console.log('✅ [checkDuplicate] Image uploaded to S3:', uploadKey);
+          
+          // Generate public URL for the uploaded image
+          imageUrl = `https://${process.env.S3_BUCKET}.s3.${process.env.AWS_REGION || 'us-east-1'}.amazonaws.com/${uploadKey}`;
+          
+          return {
+            statusCode: 200,
+            headers: { 
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({
+              success: true,
+              blocked: false,
+              totalCount: totalCount,
+              uploadCount: uploadCount,
+              imageUrl: imageUrl,
+              perceptualHash: perceptualHash,
+              similarImages: similarImages,
+              message: message
+            })
+          };
+        } catch (uploadError) {
+          console.error('❌ [checkDuplicate] S3 upload failed:', uploadError);
+          return {
+            statusCode: 500,
+            headers: { 
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({
+              success: false,
+              blocked: false,
+              totalCount: 0,
+              uploadCount: 0,
+              imageUrl: null,
+              perceptualHash: null,
+              similarImages: [],
+              message: 'Failed to upload image to S3'
+            })
+          };
+        }
       }
     }
     
@@ -377,18 +371,16 @@ exports.handler = async (event) => {
       statusCode: 200,
       body: JSON.stringify({
         success: true,
-        blocked: blocked || false,
-        totalCount: totalCount || 0,
-        uploadCount: uploadCount || 0,
-        imageUrl: imageUrl || null,
-        perceptualHash: perceptualHash || null,
-        similarImages: similarImages.length || 0,
-        message: message || 'Processing complete'
+        blocked: blocked,
+        totalCount: totalCount,
+        uploadCount: uploadCount,
+        imageUrl: imageUrl,
+        message: message
       })
     };
     
   } catch (error) {
-    console.error('Lambda error:', error);
+    console.error('❌ [checkDuplicate] Lambda error:', error);
     return {
       statusCode: 500,
       headers: { 
@@ -396,15 +388,9 @@ exports.handler = async (event) => {
         'Access-Control-Allow-Origin': '*'
       },
       body: JSON.stringify({ 
-        success: false,
-        blocked: false,
-        totalCount: 0,
-        uploadCount: 0,
-        imageUrl: null,
-        perceptualHash: null,
-        similarImages: 0,
         error: 'Internal server error',
-        message: error.message || 'Unknown error occurred'
+        success: false,
+        imageUrl: null
       })
     };
   }
@@ -428,10 +414,10 @@ exports.getImageStats = async (event) => {
   }
   
   try {
-    const result = await dynamodb.get({
+    const result = await dynamodb.send(new GetCommand({
       TableName: IMAGES_TABLE,
       Key: { perceptualHash: perceptualHash }
-    }).promise();
+    }));
     
     if (!result.Item) {
       return {
@@ -455,12 +441,12 @@ exports.getImageStats = async (event) => {
       statusCode: 200,
       body: JSON.stringify({
         perceptualHash: perceptualHash,
-        uploadCount: result.Item.uploadCount || 0,
-        firstUpload: result.Item.firstUpload || null,
-        lastUpload: result.Item.lastUpload || null,
-        uploads: result.Item.uploads || [],
-        similarImages: similarImages || [],
-        totalSimilarCount: similarImages.reduce((sum, img) => sum + (img.uploadCount || 0), 0) || 0
+        uploadCount: result.Item.uploadCount,
+        firstUpload: result.Item.firstUpload,
+        lastUpload: result.Item.lastUpload,
+        uploads: result.Item.uploads,
+        similarImages: similarImages,
+        totalSimilarCount: similarImages.reduce((sum, img) => sum + img.uploadCount, 0)
       })
     };
   } catch (error) {
