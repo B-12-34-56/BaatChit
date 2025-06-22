@@ -12,18 +12,18 @@ const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { LambdaClient, InvokeCommand } = require('@aws-sdk/client-lambda');
 
 const app = express();
-const port = process.env.PORT || 4000;
+const port = 4000;
 
 // Blocked keywords for filenames
 const BLOCKED_KEYWORDS = ['name', 'signature', 'sign', 'signed'];
 
 // Use environment variables for AWS config
-const AWS_BUCKET = process.env.AWS_BUCKET;
-const AWS_REGION = process.env.AWS_REGION;
-const AWS_ACCESS_KEY_ID = process.env.AWS_ACCESS_KEY_ID;
-const AWS_SECRET_ACCESS_KEY = process.env.AWS_SECRET_ACCESS_KEY;
-const AWS_SESSION_TOKEN = process.env.AWS_SESSION_TOKEN; // Optional, for temporary creds
-const S3_SUBFOLDER = process.env.S3_SUBFOLDER || 'images/';
+const AWS_BUCKET = "2314823894myawsbucket";
+const AWS_REGION = "us-east-1";
+const AWS_ACCESS_KEY_ID = "AKIAIOSFODNN7EXAMPLE";
+const AWS_SECRET_ACCESS_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+const AWS_SESSION_TOKEN = ""; // Optional, for temporary creds
+const S3_SUBFOLDER = 'images/';
 
 if (!AWS_BUCKET || !AWS_REGION || !AWS_ACCESS_KEY_ID || !AWS_SECRET_ACCESS_KEY) {
   throw new Error('Missing AWS config in environment variables.');

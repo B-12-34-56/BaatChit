@@ -4,13 +4,13 @@ Description: 'IAM Policies for Presigned URL Upload System'
 Parameters:
   S3BucketName:
     Type: String
-    Description: 'S3 bucket name for image uploads'
-    Default: 'process.env.AWS_S3_BUCKET'
+    Description: 'Name of the S3 bucket'
+    Default: '2314823894myawsbucket'
   
   DynamoDBTableName:
     Type: String
-    Description: 'DynamoDB table name for image signatures'
-    Default: 'process.env.DYNAMODB_TABLE'
+    Description: 'Name of the DynamoDB table'
+    Default: 'ImageSignatures'
   
   Environment:
     Type: String

@@ -6,6 +6,7 @@ import 'react-native-get-random-values';
 import Constants from 'expo-constants';
 import { GetItemCommand, UpdateItemCommand, PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { ddbClient } from '../utils/aws';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 
 // Environment configuration
 const getEnv = (key, fallback = '') =>
@@ -22,6 +23,10 @@ const awsConfig = {
     hashFieldName: 'ContentHash',
   },
 };
+
+const dynamoClient = new DynamoDBClient({
+  region: 'us-east-1',
+});
 
 /**
  * Get the current upload count for a file hash

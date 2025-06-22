@@ -3,8 +3,8 @@ import { awsConfig } from '../utils/aws';
 import axios from 'axios';
 
 // Use environment variable with fallback
-const API_URL = process.env.CHECK_DUPLICATE_URL || '';
-const API_KEY = process.env.CHECK_DUPLICATE_KEY || '';
+const API_URL = 'https://71yegno641.execute-api.us-east-1.amazonaws.com/Deployment/check-duplicate';
+const API_KEY = 'UGnuPquBcp8GZHhRzg3Rs6CR9TXcap5zmF9edDh0';
 
 // Debug configuration
 console.log('🔧 [uploadService] Configuration:', {

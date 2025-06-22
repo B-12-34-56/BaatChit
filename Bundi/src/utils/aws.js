@@ -13,12 +13,12 @@ import * as ImageManipulator from 'expo-image-manipulator';
 
 // Centralized API client with retry logic
 export const api = {
-  baseURL: process.env.REACT_APP_LAMBDA_BASE_URL || 'https://np39lyhj20.execute-api.us-east-1.amazonaws.com/Deployment',
-  checkDuplicateURL: process.env.CHECK_DUPLICATE_URL || 'https://71yegno641.execute-api.us-east-1.amazonaws.com/Deployment/check-duplicate',
-  uploadImageURL: process.env.UPLOAD_IMAGE_URL || 'https://np39lyhj20.execute-api.us-east-1.amazonaws.com/Deployment/upload-image',
-  uploadKey: process.env.UPLOAD_KEY || '',
-  blockKey: process.env.BLOCK_KEY || '',
-  checkDuplicateKey: process.env.CHECK_DUPLICATE_KEY || '',
+  baseURL: 'https://np39lyhj20.execute-api.us-east-1.amazonaws.com/Deployment',
+  checkDuplicateURL: 'https://71yegno641.execute-api.us-east-1.amazonaws.com/Deployment/check-duplicate',
+  uploadImageURL: 'https://np39lyhj20.execute-api.us-east-1.amazonaws.com/Deployment/upload-image',
+  uploadKey: 'iNrOCa2tbD8n5KfbAZ2Ct7ABHEKrBDVQ67XDlDIR',
+  blockKey: '5neH4EMngs2o2thyfNHkw2PTUzBUqMN782dC58e2',
+  checkDuplicateKey: 'UGnuPquBcp8GZHhRzg3Rs6CR9TXcap5zmF9edDh0',
   timeout: 15000,
   
   async request(endpoint, options = {}) {
@@ -93,95 +93,103 @@ export const api = {
 
 
 const awsConfig = {
- accessKeyId: process.env.AWS_ACCESS_KEY_ID,
- secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
- sessionToken: process.env.AWS_SESSION_TOKEN,
- region: process.env.AWS_REGION || 'us-east-1',
+  // AWS Credentials - Replace with actual values
+  accessKeyId: 'AKIAIOSFODNN7EXAMPLE', // Replace with actual access key
+  secretAccessKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY', // Replace with actual secret key
+  sessionToken: '', // Optional for temporary credentials
+  region: 'us-east-1',
+  
   s3: {
-   bucketName: process.env.S3_BUCKET_NAME,
-   region: process.env.AWS_REGION || "us-east-1",
-   imagesPath: "images/",
-   baseURL: process.env.AWS_S3_BASE_URL,
- },
+    bucketName: '2314823894myawsbucket',
+    region: 'us-east-1',
+    imagesPath: "images/",
+    baseURL: 'https://2314823894myawsbucket.s3.us-east-1.amazonaws.com/images/',
+  },
+  
   apiGateway: {
-   upload: {
-     url: process.env.UPLOAD_IMAGE_URL || 'https://np39lyhj20.execute-api.us-east-1.amazonaws.com/Deployment/upload-image',
-     apiKey: process.env.UPLOAD_KEY,
-   },
-   getTag: {
-     url: process.env.AWS_GETTAG_API_URL,
-     apiKey: process.env.AWS_GETTAG_API_KEY,
-   },
-   blockImage: {
-     url: process.env.AWS_BLOCKIMAGE_API_URL,
-     apiKey: process.env.BLOCK_KEY,
-   },
-   checkDuplicate: {
-     url: process.env.CHECK_DUPLICATE_URL || 'https://71yegno641.execute-api.us-east-1.amazonaws.com/Deployment/check-duplicate',
-     apiKey: process.env.CHECK_DUPLICATE_KEY,
-   },
- },
+    upload: {
+      url: 'https://np39lyhj20.execute-api.us-east-1.amazonaws.com/Deployment/upload-image',
+      apiKey: 'iNrOCa2tbD8n5KfbAZ2Ct7ABHEKrBDVQ67XDlDIR',
+    },
+    getTag: {
+      url: 'https://zudiexk4c3.execute-api.us-east-1.amazonaws.com/Stage1/get-tag',
+      apiKey: '5Zkh0awDm033cqrQM0iCQ9hclI5eUGH679MYJetu',
+    },
+    blockImage: {
+      url: 'https://ecf3rgso5g.execute-api.us-east-1.amazonaws.com/Stage1/block-image',
+      apiKey: 'iNrOCa2tbD8n5KfbAZ2Ct7ABHEKrBDVQ67XDlDIR',
+    },
+    checkDuplicate: {
+      url: 'https://71yegno641.execute-api.us-east-1.amazonaws.com/Deployment/check-duplicate',
+      apiKey: 'UGnuPquBcp8GZHhRzg3Rs6CR9TXcap5zmF9edDh0',
+    },
+  },
+  
   lambda: {
-   functions: {
-     uploadImageHandler: {
-       name: 'UploadToS3',
-       runtime: 'nodejs18.x',
-       handler: 'index.handler',
-       timeout: 30,
-       memorySize: 256,
-       environment: {
-         AWS_REGION: process.env.AWS_REGION || 'us-east-1',
-         AWS_BUCKET: process.env.AWS_S3_BUCKET,
-         S3_IMAGES_PATH: 'images/',
-         DYNAMODB_TABLE: process.env.DYNAMODB_TABLE || 'ImageSignatures',
-         DYNAMODB_REGION: process.env.AWS_REGION || 'us-east-1'
-       },
-       dependencies: [
-         '@aws-sdk/client-s3',
-         '@aws-sdk/client-dynamodb',
-         '@aws-sdk/s3-request-presigner'
-       ]
-     },
-     testEchoHandler: {
-       name: 'test-echo-handler',
-       runtime: 'nodejs18.x',
-       handler: 'index.handler',
-       timeout: 10,
-       memorySize: 128,
-       environment: {}
-     }
-   },
-   deployment: {
-     region: process.env.AWS_REGION || 'us-east-1',
-     zipFileName: 'lambda-deployment.zip',
-     sourceDir: 'src/lambdaHandlers'
-   }
- },
+    functions: {
+      uploadImageHandler: {
+        name: 'UploadToS3',
+        runtime: 'nodejs18.x',
+        handler: 'index.handler',
+        timeout: 30,
+        memorySize: 256,
+        environment: {
+          AWS_REGION: 'us-east-1',
+          AWS_BUCKET: '2314823894myawsbucket',
+          S3_IMAGES_PATH: 'images/',
+          DYNAMODB_TABLE: 'ImageSignatures',
+          DYNAMODB_REGION: 'us-east-1'
+        },
+        dependencies: [
+          '@aws-sdk/client-s3',
+          '@aws-sdk/client-dynamodb',
+          '@aws-sdk/s3-request-presigner'
+        ]
+      },
+      testEchoHandler: {
+        name: 'test-echo-handler',
+        runtime: 'nodejs18.x',
+        handler: 'index.handler',
+        timeout: 10,
+        memorySize: 128,
+        environment: {}
+      }
+    },
+    deployment: {
+      region: 'us-east-1',
+      zipFileName: 'lambda-deployment.zip',
+      sourceDir: 'src/lambdaHandlers'
+    }
+  },
+  
   dynamoDB: {
-   tableName: "ImageSignatures",
-   region: process.env.AWS_REGION || "us-east-1",
-   endpoint: process.env.AWS_DYNAMODB_ENDPOINT,
-   getTagApiGateway: process.env.AWS_GETTAG_API_GATEWAY,
- },
+    tableName: "ImageSignatures",
+    region: "us-east-1",
+    endpoint: undefined,
+    getTagApiGateway: 'https://zudiexk4c3.execute-api.us-east-1.amazonaws.com/Stage1',
+  },
+  
   cognito: {
-   userPoolId: process.env.AWS_COGNITO_USER_POOL_ID,
-   userPoolClientId: process.env.AWS_COGNITO_USER_POOL_CLIENT_ID,
-   identityPoolId: process.env.AWS_COGNITO_IDENTITY_POOL_ID,
-   region: process.env.AWS_REGION || "us-east-1",
- },
+    userPoolId: '4tdgefj0529b25if3m3v533pcs',
+    userPoolClientId: 'us-east-1_7xXNrYYMc',
+    identityPoolId: 'us-east-1:b5ca18ce-fdf4-47b0-bc93-c408c1b9f562',
+    region: "us-east-1",
+  },
+  
   app: {
-   defaultTTLInDays: 30,
-   hashFieldName: "ContentHash",
-   timestampFieldName: "Timestamp",
-   ttlFieldName: "TTL",
- },
+    defaultTTLInDays: 30,
+    hashFieldName: "ContentHash",
+    timestampFieldName: "Timestamp",
+    ttlFieldName: "TTL",
+  },
+  
   network: {
-   requestTimeoutSeconds: 30,
-   resourceTimeoutSec: 300,
-   maxRetryCount: 3,
-   initialRetryDelaySec: 1,
-   maxRetryDelaySec: 30,
- },
+    requestTimeoutSeconds: 30,
+    resourceTimeoutSec: 300,
+    maxRetryCount: 3,
+    initialRetryDelaySec: 1,
+    maxRetryDelaySec: 30,
+  },
 };
 
 

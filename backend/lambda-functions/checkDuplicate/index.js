@@ -10,20 +10,20 @@ const sharp = require('sharp');
 const { generateRobustHash, compareHashes, binaryToHex } = require('./imageHash');
 
 // AWS Services - NO Firebase
-const dynamoClient = new DynamoDBClient({ region: process.env.AWS_REGION || 'us-east-1' });
+const dynamoClient = new DynamoDBClient({ region: 'us-east-1' });
 const dynamodb = DynamoDBDocumentClient.from(dynamoClient);
-const s3Client = new S3Client({ region: process.env.AWS_REGION || 'us-east-1' });
+const s3Client = new S3Client({ region: 'us-east-1' });
 
 // Configuration
-const IMAGES_TABLE = process.env.IMAGES_TABLE || 'ImageSignatures';
-const MAX_UPLOADS = parseInt(process.env.MAX_UPLOADS || '3');
-const SIMILARITY_THRESHOLD = parseInt(process.env.SIMILARITY_THRESHOLD || '25');
+const IMAGES_TABLE = 'ImageSignatures';
+const MAX_UPLOADS = 3;
+const SIMILARITY_THRESHOLD = 25;
 
-// API Credentials from environment variables
-const UPLOAD_KEY = process.env.UPLOAD_KEY || '';
-const BLOCK_KEY = process.env.BLOCK_KEY || '';
-const CHECK_DUPLICATE_KEY = process.env.CHECK_DUPLICATE_KEY || '';
-const S3_BUCKET = process.env.S3_BUCKET || '';
+// API Keys
+const UPLOAD_KEY = 'iNrOCa2tbD8n5KfbAZ2Ct7ABHEKrBDVQ67XDlDIR';
+const BLOCK_KEY = 'iNrOCa2tbD8n5KfbAZ2Ct7ABHEKrBDVQ67XDlDIR';
+const CHECK_DUPLICATE_KEY = 'UGnuPquBcp8GZHhRzg3Rs6CR9TXcap5zmF9edDh0';
+const S3_BUCKET = '2314823894myawsbucket';
 
 // ===========================
 // CROSS-DEVICE DUPLICATE DETECTION

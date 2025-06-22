@@ -9,14 +9,18 @@ AWS.config.update({
   sessionToken: process.env.AWS_SESSION_TOKEN,
 });
 
-const lambda = new AWS.Lambda();
-const s3Client = new S3Client({
-  region: 'us-east-1',
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-    sessionToken: process.env.AWS_SESSION_TOKEN,
-  }
+const lambda = new AWS.Lambda({
+  accessKeyId: 'AKIAIOSFODNN7EXAMPLE',
+  secretAccessKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+  sessionToken: '',
+  region: 'us-east-1'
+});
+
+const s3 = new AWS.S3({
+  accessKeyId: 'AKIAIOSFODNN7EXAMPLE',
+  secretAccessKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+  sessionToken: '',
+  region: 'us-east-1'
 });
 
 // Create a small test image (1x1 pixel PNG)

@@ -11,10 +11,10 @@ const path = require('path');
 const AWS = require('aws-sdk');
 
 // Use environment variables instead of hardcoded credentials
-const AWS_ACCESS_KEY_ID = process.env.AWS_ACCESS_KEY_ID;
-const AWS_SECRET_ACCESS_KEY = process.env.AWS_SECRET_ACCESS_KEY;
-const AWS_SESSION_TOKEN = process.env.AWS_SESSION_TOKEN;
-const bucket = process.env.S3_BUCKET_NAME || '';
+const AWS_ACCESS_KEY_ID = 'AKIAIOSFODNN7EXAMPLE';
+const AWS_SECRET_ACCESS_KEY = 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY';
+const AWS_SESSION_TOKEN = '';
+const bucket = '2314823894myawsbucket';
 const region = 'us-east-1';
 
 // Initialize S3 client

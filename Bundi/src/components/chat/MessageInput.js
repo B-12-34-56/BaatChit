@@ -33,8 +33,8 @@ import { styles } from './MessageStyles';
 import { MaterialIcons } from '@expo/vector-icons';
 
 // AWS API Endpoints from environment variables
-const LAMBDA_CHECK_DUPLICATE = process.env.REACT_APP_LAMBDA_CHECK_DUPLICATE || '';
-const LAMBDA_GET_STATS = process.env.REACT_APP_LAMBDA_GET_STATS || '';
+const LAMBDA_CHECK_DUPLICATE = 'https://71yegno641.execute-api.us-east-1.amazonaws.com/Deployment/check-duplicate';
+const LAMBDA_GET_STATS = 'https://np39lyhj20.execute-api.us-east-1.amazonaws.com/Deployment/get-stats';
 
 // Timing utility
 const getTimestamp = () => {
@@ -209,8 +209,8 @@ async function handleAWSUpload(imageUri, imageFile, currentUser) {
     if (!imageUrl) {
       console.warn('⚠️ Lambda function did not return image URL, using placeholder');
       // Return partial success with placeholder or fallback URL
-      const s3Bucket = process.env.S3_BUCKET_NAME || 'images-bucket';
-      const region = process.env.AWS_REGION || 'us-east-1';
+      const s3Bucket = '2314823894myawsbucket';
+      const region = 'us-east-1';
       const placeholderUrl = `https://${s3Bucket}.s3.${region}.amazonaws.com/images/${currentUser.uid}/placeholder_${Date.now()}.jpg`;
       
       return {

@@ -20,7 +20,7 @@ import { getPresignedUrl } from '../services/presignService';
 import { messageService } from '../services/messageService';
 
 // Use environment variables without hardcoded fallbacks
-const PRESIGN_API_URL = process.env.EXPO_PUBLIC_PRESIGN_API_URL || "";
+const PRESIGN_API_URL = "http://localhost:4000/presign";
 
 // Keywords you want to block
 const BLOCKED_KEYWORDS = ['name', 'signature', 'sign', 'signed'];

@@ -12,21 +12,20 @@ const AWS = require('aws-sdk');
 
 // AWS Configuration from your setup
 const AWS_CONFIG = {
-  bucket: process.env.AWS_S3_BUCKET,
+  bucket: '2314823894myawsbucket',
   region: 'us-east-1',
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  sessionToken: process.env.AWS_SESSION_TOKEN, // Optional for temporary credentials
+  accessKeyId: 'AKIAIOSFODNN7EXAMPLE',
+  secretAccessKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+  sessionToken: '', // Optional for temporary credentials
 };
 
 // Initialize S3 client
 const s3Client = new S3Client({
-  region: AWS_CONFIG.region,
-  credentials: {
-    accessKeyId: AWS_CONFIG.accessKeyId,
-    secretAccessKey: AWS_CONFIG.secretAccessKey,
-    sessionToken: AWS_CONFIG.sessionToken,
-  },
+  bucket: '2314823894myawsbucket',
+  region: 'us-east-1',
+  accessKeyId: 'AKIAIOSFODNN7EXAMPLE',
+  secretAccessKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+  sessionToken: '', // Optional for temporary credentials
 });
 
 // CORS Configuration for public access
