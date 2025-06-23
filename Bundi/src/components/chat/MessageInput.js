@@ -21,20 +21,16 @@ import { ChatContext } from '../../context/ChatContext';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth } from '../../utils/firebase';
 import { messageService } from '../../services/messageService';
-import { getStorage, ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
-import { getFirestore, doc, getDoc, setDoc, updateDoc, serverTimestamp, collection, getDocs, query, where, limit, orderBy, deleteDoc } from "firebase/firestore";
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { uploadUserContent } from '../../services/storageService';
 import { awsConfig, uploadImageToS3, getImageUploadCountDynamo, incrementImageUploadCountDynamo, checkAWSCredentials, api } from '../../utils/aws';
 import { getPresignedUrl } from '../../services/presignService';
-import { uploadImage } from '../../services/uploadService';
+import { uploadImage, waitForS3 } from '../../services/uploadService';
 import Toast from 'react-native-toast-message';
-import { styles } from './MessageStyles';
 import { MaterialIcons } from '@expo/vector-icons';
 
 // AWS API Endpoints from environment variables
-const LAMBDA_CHECK_DUPLICATE = 'https://71yegno641.execute-api.us-east-1.amazonaws.com/Deployment/check-duplicate';
-const LAMBDA_GET_STATS = 'https://np39lyhj20.execute-api.us-east-1.amazonaws.com/Deployment/get-stats';
+// Note: These are now handled by the api.checkDuplicate function from aws.js
 
 // Timing utility
 const getTimestamp = () => {
@@ -80,27 +76,24 @@ async function checkDuplicateWithLambda(imageUri, fileHash, userId, fileName) {
       userId
     });
     
-    const base64 = await FileSystem.readAsStringAsync(imageUri, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
-    
-    console.log('🔍 [checkDuplicateWithLambda] Sending request via API client');
+    console.log('🔍 [checkDuplicateWithLambda] Starting direct S3 upload...');
     console.log('🔍 [checkDuplicateWithLambda] Request payload:', {
-      hasImageData: !!base64,
-      imageDataLength: base64.length,
+      fileUri: imageUri,
       fileHash: fileHash.substring(0, 12) + '...',
       userId,
       fileName
     });
     
-    const result = await api.checkDuplicate({
-      imageData: base64,
+    // Use the new upload service that uploads directly to S3
+    const result = await uploadImage({
+      fileUri: imageUri,
+      filename: fileName,
       fileHash: fileHash,
-      userId: userId,
-      fileName: fileName
+      contentType: 'image/jpeg',
+      userId: userId
     });
     
-    console.log('🔍 [checkDuplicateWithLambda] Parsed result:', {
+    console.log('🔍 [checkDuplicateWithLambda] Upload result:', {
       success: result.success,
       blocked: result.blocked,
       hasImageUrl: !!result.imageUrl,
@@ -133,7 +126,7 @@ async function checkDuplicateWithLambda(imageUri, fileHash, userId, fileName) {
       Toast.show({
         type: 'error',
         text1: 'Upload Error',
-        text2: error.message || 'Failed to check for duplicates',
+        text2: error.message || 'Failed to upload image',
         position: 'top',
         visibilityTime: 4000,
       });
@@ -203,27 +196,12 @@ async function handleAWSUpload(imageUri, imageFile, currentUser) {
       };
     }
     
-    // Step 4: Use the image URL from Lambda (upload already completed)
+    // Step 4: Use the image URL from the upload service
     const imageUrl = duplicateCheck.imageUrl;
     
     if (!imageUrl) {
-      console.warn('⚠️ Lambda function did not return image URL, using placeholder');
-      // Return partial success with placeholder or fallback URL
-      const s3Bucket = '2314823894myawsbucket';
-      const region = 'us-east-1';
-      const placeholderUrl = `https://${s3Bucket}.s3.${region}.amazonaws.com/images/${currentUser.uid}/placeholder_${Date.now()}.jpg`;
-      
-      return {
-        imageUrl: placeholderUrl,
-        imageHash: fileHash,
-        perceptualHash: duplicateCheck.perceptualHash || fileHash,
-        imageTag: 'warning',
-        warningMessage: 'Upload partially completed. The image may take a moment to appear.',
-        blocked: false,
-        totalCount: duplicateCheck.totalCount || 1,
-        uploadCount: duplicateCheck.uploadCount || 1,
-        similarImages: duplicateCheck.similarImages || []
-      };
+      console.error('❌ Upload service did not return image URL');
+      throw new Error('Image upload failed - no URL returned');
     }
     
     const duration = performance.now() - startTime;
@@ -340,6 +318,9 @@ const MessageInput = () => {
   const [hasPermission, setHasPermission] = useState(null);
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
   const [duplicateModalData, setDuplicateModalData] = useState(null);
+  const [imageSrc, setImageSrc] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -400,6 +381,7 @@ const MessageInput = () => {
     let imageTag = null;
     let warningMessage = '';
     
+    // Send message immediately with placeholder if there's an image
     if (imageUri) {
       console.log('🖼️ Processing image upload...');
       setDuplicateWarning('');
@@ -411,35 +393,75 @@ const MessageInput = () => {
           return;
         }
         
-        // Use AWS upload with duplicate detection
-        const uploadResult = await handleAWSUpload(imageUri, imageFile, currentUser);
+        // Generate file hash for tracking
+        const fileHash = await getFileHash(imageUri);
+        imageHash = fileHash;
         
-        if (uploadResult.blocked) {
-          // Show duplicate modal
-          setDuplicateModalData({
-            totalCount: uploadResult.totalCount,
-            uploadCount: uploadResult.uploadCount,
-            similarImages: uploadResult.similarImages,
-            allUploads: formatUploadHistory(uploadResult.similarImages, uploadResult.uploadCount),
-            fileHash: uploadResult.imageHash,
-            perceptualHash: uploadResult.perceptualHash,
-            canProceed: false
-          });
-          setShowDuplicateModal(true);
-          setUploading(false);
-          setImageUri(null);
-          setImageFile(null);
-          return;
-        }
+        // Create a placeholder URL for the uploading state
+        const placeholderUrl = `${process.env.EXPO_PUBLIC_S3_BASE_URL || 'YOUR_S3_BASE_URL'}/${currentUser.uid}/uploading_${Date.now()}.jpg`;
+        imageUrl = placeholderUrl;
+        imageTag = 'uploading';
+        warningMessage = 'Image is being uploaded...';
         
-        imageUrl = uploadResult.imageUrl;
-        imageHash = uploadResult.imageHash;
-        imageTag = uploadResult.imageTag;
-        warningMessage = uploadResult.warningMessage;
+        // Send message immediately with placeholder
+        await messageService.sendMessage(
+          data.chatId,
+          {
+            senderUid: currentUser.uid,
+            senderDisplayName: currentUser.displayName,
+            senderPhotoURL: currentUser.photoURL,
+            recipientDisplayName: data.user?.displayName,
+            recipientPhotoURL: data.user?.photoURL,
+            text: text || `[Image: ${imageFile?.fileName || 'image.jpg'}]`,
+            type: 'image',
+            imageUrl: imageUrl,
+            imageHash: imageHash,
+            imageTag: imageTag,
+            createdAt: new Date(),
+          },
+          data.user?.uid
+        );
         
-        // Show warning if needed
-        if (uploadResult.totalCount === 2) {
-          setDuplicateWarning('⚠️ WARNING: This image has been uploaded twice. One more upload will reach the limit.');
+        console.log('✅ [MessageInput] Message sent with placeholder URL');
+        
+        // Now handle the actual upload in the background
+        try {
+          const uploadResult = await checkDuplicateWithLambda(
+            imageUri, 
+            fileHash, 
+            currentUser.uid,
+            imageFile?.fileName || 'image.jpg'
+          );
+          
+          if (uploadResult.blocked) {
+            // Show duplicate modal
+            setDuplicateModalData({
+              totalCount: uploadResult.totalCount,
+              uploadCount: uploadResult.uploadCount,
+              similarImages: uploadResult.similarImages,
+              allUploads: formatUploadHistory(uploadResult.similarImages, uploadResult.uploadCount),
+              fileHash: uploadResult.imageHash,
+              perceptualHash: uploadResult.perceptualHash,
+              canProceed: false
+            });
+            setShowDuplicateModal(true);
+            setUploading(false);
+            setImageUri(null);
+            setImageFile(null);
+            return;
+          }
+          
+          // Update the message with the real image URL
+          if (uploadResult.imageUrl) {
+            console.log('✅ [MessageInput] Upload completed, updating message with real URL');
+            // Here you would update the message in the database with the real URL
+            // For now, we'll just log it
+            console.log('Real image URL:', uploadResult.imageUrl);
+          }
+          
+        } catch (uploadError) {
+          console.error('❌ [MessageInput] Background upload failed:', uploadError);
+          // Don't block the UI, just log the error
         }
         
       } catch (err) {
@@ -450,18 +472,10 @@ const MessageInput = () => {
       }
       
       setUploading(false);
-    }
-    
-    // Send message if we have a valid upload or text-only message
-    if (!imageUri || imageUrl) {
+    } else {
+      // Text-only message - send immediately
       try {
-        console.log('📤 [MessageInput] Sending message with image:', {
-          hasImage: !!imageUri,
-          imageUrl: imageUrl?.substring(0, 50) + '...',
-          imageHash: imageHash?.substring(0, 12) + '...',
-          imageTag,
-          text: text || (imageUri ? `[Image: ${imageFile?.fileName || 'image.jpg'}]` : '')
-        });
+        console.log('📤 [MessageInput] Sending text message');
         
         await messageService.sendMessage(
           data.chatId,
@@ -471,35 +485,30 @@ const MessageInput = () => {
             senderPhotoURL: currentUser.photoURL,
             recipientDisplayName: data.user?.displayName,
             recipientPhotoURL: data.user?.photoURL,
-            text: text || (imageUri ? `[Image: ${imageFile?.fileName || 'image.jpg'}]` : ''),
-            type: imageUri ? 'image' : 'text',
-            imageUrl: imageUrl || null,
-            imageHash: imageHash || null,
-            imageTag: imageTag || null,
+            text: text,
+            type: 'text',
             createdAt: new Date(),
           },
           data.user?.uid
         );
         
-        console.log('✅ [MessageInput] Message sent successfully');
+        console.log('✅ [MessageInput] Text message sent successfully');
         
-        if (mounted.current) {
-          setText('');
-          setImageUri(null);
-          setImageFile(null);
-          setDuplicateWarning('');
-          setDuplicateModalData(null);
-          setShowDuplicateModal(false);
-        }
       } catch (error) {
         console.error('❌ [MessageInput] Message send error:', error);
         Alert.alert('Send Failed', 'Failed to send message. Please try again.');
+        return;
       }
-    } else {
-      console.warn('⚠️ [MessageInput] Cannot send message - missing image URL:', {
-        hasImageUri: !!imageUri,
-        hasImageUrl: !!imageUrl
-      });
+    }
+    
+    // Clear the form
+    if (mounted.current) {
+      setText('');
+      setImageUri(null);
+      setImageFile(null);
+      setDuplicateWarning('');
+      setDuplicateModalData(null);
+      setShowDuplicateModal(false);
     }
   };
 

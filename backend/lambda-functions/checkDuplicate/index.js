@@ -3,27 +3,56 @@
 // ===========================
 // NO Firebase dependencies - runs entirely on AWS
 
-const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
+const { DynamoDBClient, QueryCommand, PutItemCommand } = require('@aws-sdk/client-dynamodb');
 const { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand, ScanCommand } = require('@aws-sdk/lib-dynamodb');
 const { S3Client, DeleteObjectCommand, PutObjectCommand } = require('@aws-sdk/client-s3');
 const sharp = require('sharp');
 const { generateRobustHash, compareHashes, binaryToHex } = require('./imageHash');
+const { marshall, unmarshall } = require('@aws-sdk/util-dynamodb');
+const crypto = require('crypto');
+
+// AWS Configuration - Use environment variables
+const awsConfig = {
+  region: process.env.AWS_REGION || 'us-east-1',
+  s3: {
+    bucketName: process.env.S3_BUCKET || 'YOUR_S3_BUCKET_NAME',
+    baseURL: process.env.S3_BASE_URL || 'YOUR_S3_BASE_URL',
+  },
+  dynamodb: {
+    tableName: process.env.DYNAMODB_TABLE || 'YOUR_DYNAMODB_TABLE',
+    region: process.env.AWS_REGION || 'us-east-1',
+  },
+  api: {
+    uploadUrl: process.env.UPLOAD_API_URL || 'YOUR_UPLOAD_API_URL',
+    uploadKey: process.env.UPLOAD_API_KEY || 'YOUR_UPLOAD_API_KEY',
+    blockUrl: process.env.BLOCK_API_URL || 'YOUR_BLOCK_API_URL',
+    blockKey: process.env.BLOCK_API_KEY || 'YOUR_BLOCK_API_KEY',
+  },
+  fields: {
+    hashFieldName: 'ContentHash',
+    timestampFieldName: 'Timestamp',
+    ttlFieldName: 'TTL',
+  },
+  app: {
+    defaultTTLInDays: 30,
+  },
+};
 
 // AWS Services - NO Firebase
-const dynamoClient = new DynamoDBClient({ region: 'us-east-1' });
+const dynamoClient = new DynamoDBClient({ region: awsConfig.dynamodb.region });
 const dynamodb = DynamoDBDocumentClient.from(dynamoClient);
-const s3Client = new S3Client({ region: 'us-east-1' });
+const s3Client = new S3Client({ region: awsConfig.region });
 
 // Configuration
-const IMAGES_TABLE = 'ImageSignatures';
+const IMAGES_TABLE = awsConfig.dynamodb.tableName;
 const MAX_UPLOADS = 3;
 const SIMILARITY_THRESHOLD = 25;
 
 // API Keys
-const UPLOAD_KEY = 'iNrOCa2tbD8n5KfbAZ2Ct7ABHEKrBDVQ67XDlDIR';
-const BLOCK_KEY = 'iNrOCa2tbD8n5KfbAZ2Ct7ABHEKrBDVQ67XDlDIR';
-const CHECK_DUPLICATE_KEY = 'UGnuPquBcp8GZHhRzg3Rs6CR9TXcap5zmF9edDh0';
-const S3_BUCKET = '2314823894myawsbucket';
+const UPLOAD_KEY = awsConfig.api.uploadKey;
+const BLOCK_KEY = awsConfig.api.blockKey;
+const CHECK_DUPLICATE_KEY = awsConfig.api.uploadKey;
+const S3_BUCKET = awsConfig.s3.bucketName;
 
 // ===========================
 // CROSS-DEVICE DUPLICATE DETECTION
@@ -333,6 +362,23 @@ exports.handler = async (event) => {
           
           // Generate public URL for the uploaded image
           imageUrl = `https://${S3_BUCKET}.s3.${process.env.AWS_REGION || 'us-east-1'}.amazonaws.com/${uploadKey}`;
+          
+          if (!imageUrl) {
+            console.warn('[Lambda] No imageUrl set for key', { fileName });
+            return {
+              statusCode: 500,
+              headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+              },
+              body: JSON.stringify({
+                success: false,
+                error: 'Image upload failed: no imageUrl returned',
+                message: 'Lambda did not return an imageUrl',
+                imageUrl: null
+              })
+            };
+          }
           
           return {
             statusCode: 200,

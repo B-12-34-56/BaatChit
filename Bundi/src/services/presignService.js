@@ -1,49 +1,35 @@
 import Constants from 'expo-constants';
+import { getPresignedUrl as getPresignedUrlFromHelper } from '../apiHelpers/getPresignedUrl';
 
 /**
  * Gets a presigned URL for S3 upload
  * @param {string} filename - The filename to get a presigned URL for
  * @param {string} contentType - The content type of the file
- * @param {string} apiUrl - The API URL to use for getting the presigned URL
- * @returns {Promise<string>} The presigned URL
+ * @param {string} apiUrl - The API URL to use for getting the presigned URL (optional, uses default from awsConfig)
+ * @returns {Promise<{method: string, uploadUrl: string, uploadFields: object, s3Key: string}>} The presigned URL response
  */
 export const getPresignedUrl = async (filename, contentType, apiUrl) => {
-  // In React Native, get API URL from expo config if not provided
-  apiUrl = apiUrl || Constants.expoConfig?.extra?.presignApiUrl || Constants.manifest?.extra?.presignApiUrl;
-  
-  if (!apiUrl) {
-    throw new Error("Presign API URL not set in app configuration.");
-  }
-  
-  let urlWithQuery = `${apiUrl}?filename=${encodeURIComponent(filename)}`;
-  if (contentType) {
-    urlWithQuery += `&contentType=${encodeURIComponent(contentType)}`;
-  }
-  
   try {
-    const response = await fetch(urlWithQuery, {
-      method: "GET",
-      headers: { "Content-Type": "application/json" },
+    console.log('🔗 [presignService] Getting presigned URL for:', { filename, contentType });
+    
+    // Use the standardized implementation
+    const result = await getPresignedUrlFromHelper(filename, contentType, 'post');
+    
+    console.log('✅ [presignService] Presigned URL received:', {
+      method: result.method,
+      hasUploadUrl: !!result.uploadUrl,
+      s3Key: result.s3Key
     });
     
-    if (!response.ok) {
-      throw new Error(`HTTP error! Status: ${response.status}`);
-    }
-    
-    const data = await response.json();
-    if (data && data.presignedUrl) {
-      return data.presignedUrl;
-    }
-    
-    throw new Error("Failed to get presigned URL from response");
+    return result;
   } catch (error) {
-    console.error("Error getting presigned URL:", error);
-    throw new Error(error instanceof Error ? error.message : "Failed to get presigned URL");
+    console.error('❌ [presignService] Error getting presigned URL:', error);
+    throw error;
   }
 };
 
 /**
- * Uploads a file to S3 using a presigned URL
+ * Uploads a file to S3 using a presigned URL (POST method - recommended)
  * @param {string} presignedUrl - The presigned URL to upload to
  * @param {Object} file - The file object (in RN this could be from ImagePicker or DocumentPicker)
  * @param {string} file.uri - The local URI of the file
@@ -52,17 +38,18 @@ export const getPresignedUrl = async (filename, contentType, apiUrl) => {
  */
 export const uploadFileToS3 = async (presignedUrl, file) => {
   try {
-    // In React Native, we need to create a FormData or use the file URI directly
+    console.log('📤 [presignService] Uploading file to S3 using POST method...');
+    
+    // Create FormData for POST upload
+    const form = new FormData();
+    
+    // Add the file as a blob
+    const fileBlob = await (await fetch(file.uri)).blob();
+    form.append('file', fileBlob);
+
     const response = await fetch(presignedUrl, {
-      method: 'PUT',
-      headers: { 
-        'Content-Type': file.type || 'application/octet-stream'
-      },
-      body: file.uri ? 
-        // If it's a React Native file object with URI
-        await fetch(file.uri).then(res => res.blob()) :
-        // If it's already a blob/file object
-        file,
+      method: 'POST',
+      body: form,
     });
     
     if (!response.ok) {
@@ -77,9 +64,10 @@ export const uploadFileToS3 = async (presignedUrl, file) => {
     
     // Remove query params to get the S3 object URL
     const url = presignedUrl.split('?')[0];
+    console.log('✅ [presignService] File uploaded successfully:', url.substring(0, 50) + '...');
     return url;
   } catch (err) {
-    console.error('Error uploading file to S3:', err);
+    console.error('❌ [presignService] Error uploading file to S3:', err);
     throw err;
   }
 };
@@ -103,6 +91,8 @@ export const uploadFileToS3WithFormData = async (presignedUrl, file) => {
   }
 
   try {
+    console.log('📤 [presignService] Uploading file with FormData...');
+    
     const formData = new FormData();
     
     // Validate file properties before appending
@@ -126,11 +116,8 @@ export const uploadFileToS3WithFormData = async (presignedUrl, file) => {
     formData.append('file', fileData);
 
     const response = await fetch(presignedUrl, {
-      method: 'PUT',
+      method: 'POST',
       body: formData,
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
     });
 
     if (!response.ok) {
@@ -145,9 +132,10 @@ export const uploadFileToS3WithFormData = async (presignedUrl, file) => {
 
     // Remove query params to get the S3 object URL
     const url = presignedUrl.split('?')[0];
+    console.log('✅ [presignService] File uploaded successfully with FormData:', url.substring(0, 50) + '...');
     return url;
   } catch (err) {
-    console.error('Error uploading file to S3 with FormData:', err);
+    console.error('❌ [presignService] Error uploading file to S3 with FormData:', err);
     throw err;
   }
 };

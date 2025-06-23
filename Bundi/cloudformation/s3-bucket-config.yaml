@@ -1,17 +1,13 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'S3 Bucket Configuration for Image Uploads'
+Description: 'S3 Bucket Configuration for Bundi App'
 
 Parameters:
   S3BucketName:
     Type: String
-    Default: '2314823894myawsbucket'
-    Description: 'Name of the S3 bucket for image uploads'
-  
-  Environment:
-    Type: String
-    Default: 'development'
-    AllowedValues: ['development', 'staging', 'production']
-    Description: 'Environment name'
+    Description: 'Name of the S3 bucket for storing images'
+    Default: 'YOUR_S3_BUCKET_NAME'
+    AllowedPattern: '^[a-z0-9-]+$'
+    ConstraintDescription: 'Bucket name must contain only lowercase letters, numbers, and hyphens'
 
 Resources:
   # S3 Bucket
@@ -22,56 +18,15 @@ Resources:
       PublicAccessBlockConfiguration:
         BlockPublicAcls: false        # Allow public ACLs for presigned URLs
         IgnorePublicAcls: false       # Don't ignore public ACLs
-        BlockPublicPolicy: true       # Block public bucket policies (security)
-        RestrictPublicBuckets: true   # Restrict public bucket access (security)
+        BlockPublicPolicy: false       # Block public bucket policies (security)
+        RestrictPublicBuckets: false   # Restrict public bucket access (security)
       
       # CORS Configuration for presigned URL uploads
       CorsConfiguration:
         CorsRules:
-          - AllowedHeaders:
-              - 'Content-Type'
-              - 'Content-Length'
-              - 'x-amz-content-sha256'
-              - 'x-amz-date'
-              - 'x-amz-security-token'
-              - 'Authorization'
-              - 'Origin'
-              - 'Accept'
-              - 'Cache-Control'
-              - 'Pragma'
-            AllowedMethods:
-              - GET
-              - PUT
-              - POST
-              - HEAD
-              - DELETE
-            AllowedOrigins:
-              # Expo development
-              - 'exp://localhost:8081'
-              - 'exp://192.168.*.*:8081'
-              - 'exp://10.*.*.*:8081'
-              - 'exp://172.*.*.*:8081'
-              # App scheme
-              - 'bundikitab://*'
-              # Web development
-              - 'http://localhost:3000'
-              - 'http://localhost:19006'
-              - 'https://localhost:3000'
-              - 'https://localhost:19006'
-              # Expo Go
-              - 'exp://exp.host'
-              - 'exp://u.expo.dev'
-              # Development wildcard (remove in production)
-              - '*'
-            ExposeHeaders:
-              - 'ETag'
-              - 'x-amz-version-id'
-              - 'x-amz-delete-marker'
-              - 'x-amz-expiration'
-              - 'x-amz-restore'
-              - 'x-amz-storage-class'
-              - 'x-amz-request-id'
-              - 'x-amz-id-2'
+          - AllowedHeaders: ['*']
+            AllowedMethods: [GET, PUT, POST, DELETE, HEAD]
+            AllowedOrigins: ['*']
             MaxAge: 3000
       
       # Versioning for data protection
@@ -87,15 +42,12 @@ Resources:
       # Lifecycle policy (optional - adjust based on your needs)
       LifecycleConfiguration:
         Rules:
-          - Id: DeleteIncompleteMultipartUploads
+          - Id: DeleteOldVersions
             Status: Enabled
-            AbortIncompleteMultipartUpload:
-              DaysAfterInitiation: 7
+            NoncurrentVersionExpirationInDays: 30
       
       # Tags
       Tags:
-        - Key: Environment
-          Value: !Ref Environment
         - Key: Purpose
           Value: 'Presigned URL Uploads'
         - Key: ManagedBy
@@ -196,17 +148,17 @@ Resources:
       RetentionInDays: 14
 
 Outputs:
-  BucketName:
+  S3BucketName:
     Description: 'Name of the S3 bucket'
     Value: !Ref S3Bucket
     Export:
-      Name: !Sub '${AWS::StackName}-BucketName'
+      Name: !Sub '${AWS::StackName}-S3BucketName'
   
-  BucketArn:
+  S3BucketArn:
     Description: 'ARN of the S3 bucket'
     Value: !GetAtt S3Bucket.Arn
     Export:
-      Name: !Sub '${AWS::StackName}-BucketArn'
+      Name: !Sub '${AWS::StackName}-S3BucketArn'
   
   LambdaExecutionRoleArn:
     Description: 'ARN of the Lambda execution role'

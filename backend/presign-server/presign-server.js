@@ -10,41 +10,45 @@ const express = require('express');
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { LambdaClient, InvokeCommand } = require('@aws-sdk/client-lambda');
+const crypto = require('crypto');
 
 const app = express();
-const port = 4000;
+const PORT = process.env.PORT || 4000;
 
 // Blocked keywords for filenames
 const BLOCKED_KEYWORDS = ['name', 'signature', 'sign', 'signed'];
 
-// Use environment variables for AWS config
-const AWS_BUCKET = "2314823894myawsbucket";
-const AWS_REGION = "us-east-1";
-const AWS_ACCESS_KEY_ID = "AKIAIOSFODNN7EXAMPLE";
-const AWS_SECRET_ACCESS_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
-const AWS_SESSION_TOKEN = ""; // Optional, for temporary creds
-const S3_SUBFOLDER = 'images/';
+// AWS Configuration - Use environment variables
+const awsConfig = {
+  bucket: process.env.AWS_BUCKET || 'YOUR_S3_BUCKET_NAME',
+  region: process.env.AWS_REGION || 'us-east-1',
+  accessKeyId: process.env.AWS_ACCESS_KEY_ID || 'YOUR_AWS_ACCESS_KEY_ID',
+  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || 'YOUR_AWS_SECRET_ACCESS_KEY',
+  s3ImagesPath: 'images/',
+};
 
-if (!AWS_BUCKET || !AWS_REGION || !AWS_ACCESS_KEY_ID || !AWS_SECRET_ACCESS_KEY) {
-  throw new Error('Missing AWS config in environment variables.');
-}
+console.log('🔧 Presign server configuration:', {
+  region: awsConfig.region,
+  bucket: awsConfig.bucket,
+  hasAccessKey: !!awsConfig.accessKeyId,
+  hasSecretKey: !!awsConfig.secretAccessKey,
+  subfolder: awsConfig.s3ImagesPath
+});
 
-const s3 = new S3Client({
-  region: AWS_REGION,
+const s3Client = new S3Client({
+  region: awsConfig.region,
   credentials: {
-    accessKeyId: AWS_ACCESS_KEY_ID,
-    secretAccessKey: AWS_SECRET_ACCESS_KEY,
-    sessionToken: AWS_SESSION_TOKEN,
-  },
+    accessKeyId: awsConfig.accessKeyId,
+    secretAccessKey: awsConfig.secretAccessKey,
+  }
 });
 
 // Initialize Lambda client
 const lambda = new LambdaClient({
-  region: AWS_REGION,
+  region: awsConfig.region,
   credentials: {
-    accessKeyId: AWS_ACCESS_KEY_ID,
-    secretAccessKey: AWS_SECRET_ACCESS_KEY,
-    sessionToken: AWS_SESSION_TOKEN,
+    accessKeyId: awsConfig.accessKeyId,
+    secretAccessKey: awsConfig.secretAccessKey,
   },
 });
 
@@ -57,7 +61,7 @@ const lambda = new LambdaClient({
  *       "Sid": "UploadToS3",
  *       "Effect": "Allow",
  *       "Action": "s3:PutObject",
- *       "Resource": "arn:aws:s3:::2314823894myawsbucket/images/*"
+ *       "Resource": "arn:aws:s3:::YOUR_S3_BUCKET_NAME/images/*"
  *     }
  *   ]
  * }
@@ -142,23 +146,23 @@ app.get('/presign', async (req, res) => {
   }
 
   // S3 key should match frontend (e.g. image-test/filename)
-  const key = `${S3_SUBFOLDER}${filename}`;
+  const key = `${awsConfig.s3ImagesPath}${filename}`;
 
   try {
     const command = new PutObjectCommand({
-      Bucket: AWS_BUCKET,
+      Bucket: awsConfig.bucket,
       Key: key,
       ContentType: contentType,
     });
-    const presignedUrl = await getSignedUrl(s3, command, { expiresIn: 900 }); // 15 min
+    const presignedUrl = await getSignedUrl(s3Client, command, { expiresIn: 900 }); // 15 min
     res.json({ presignedUrl });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-app.listen(port, () => {
-  console.log(`Presign server running on http://localhost:${port}`);
+app.listen(PORT, () => {
+  console.log(`Presign server running on http://localhost:${PORT}`);
   console.log('Available endpoints:');
   console.log('  GET  /presign - Get presigned URL for S3 upload');
   console.log('  POST /check-duplicate - Check for duplicate images via Lambda');

@@ -10,12 +10,12 @@ import { Buffer } from 'buffer';
 const getEnv = (key, fallback = '') =>
   process.env[key] || Constants.expoConfig?.extra?.[key] || fallback;
 
-// API Configuration
+// API Configuration - Use environment variables
 const apiConfig = {
-  uploadImageUrl: getEnv('UPLOAD_IMAGE_API_URL', ''),
-  uploadImageKey: getEnv('UPLOAD_IMAGE_API_KEY', ''),
-  confirmUploadUrl: getEnv('CONFIRM_UPLOAD_API_URL', ''),
-  confirmUploadKey: getEnv('CONFIRM_UPLOAD_API_KEY', ''),
+  uploadImageUrl: getEnv('UPLOAD_IMAGE_API_URL', 'YOUR_UPLOAD_IMAGE_API_URL'),
+  uploadImageKey: getEnv('UPLOAD_IMAGE_API_KEY', 'YOUR_UPLOAD_IMAGE_API_KEY'),
+  confirmUploadUrl: getEnv('CONFIRM_UPLOAD_API_URL', 'YOUR_CONFIRM_UPLOAD_API_URL'),
+  confirmUploadKey: getEnv('CONFIRM_UPLOAD_API_KEY', 'YOUR_CONFIRM_UPLOAD_API_KEY'),
 };
 
 /**

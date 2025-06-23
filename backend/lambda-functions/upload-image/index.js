@@ -3,26 +3,33 @@ const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { DynamoDBClient, GetItemCommand, UpdateItemCommand, PutItemCommand } = require('@aws-sdk/client-dynamodb');
 const multipart = require('parse-multipart');
+const { marshall } = require('@aws-sdk/util-dynamodb');
+const crypto = require('crypto');
 
-// Import AWS configuration from utils
+// AWS Configuration - Use environment variables
 const awsConfig = {
-  region: 'us-east-1',
-  bucket: '2314823894myawsbucket',
-  dynamodb: {
-    tableName: 'ImageSignatures',
-    region: 'us-east-1',
-  },
   s3: {
+    bucket: process.env.AWS_BUCKET || 'YOUR_S3_BUCKET_NAME',
+    region: process.env.AWS_REGION || 'us-east-1',
     imagesPath: 'images/',
+  },
+  dynamodb: {
+    tableName: process.env.DYNAMODB_TABLE || 'YOUR_DYNAMODB_TABLE',
+    region: process.env.AWS_REGION || 'us-east-1',
   },
   fields: {
     hashFieldName: 'ContentHash',
+    timestampFieldName: 'Timestamp',
+    ttlFieldName: 'TTL',
+  },
+  app: {
+    defaultTTLInDays: 30,
   },
 };
 
 const s3Client = new S3Client({
   region: 'us-east-1',
-  bucket: '2314823894myawsbucket',
+  bucket: process.env.AWS_BUCKET || 'YOUR_S3_BUCKET_NAME',
 });
 
 const dynamoClient = new DynamoDBClient({

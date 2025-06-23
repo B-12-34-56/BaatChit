@@ -13,12 +13,12 @@ import * as ImageManipulator from 'expo-image-manipulator';
 
 // Centralized API client with retry logic
 export const api = {
-  baseURL: 'https://np39lyhj20.execute-api.us-east-1.amazonaws.com/Deployment',
-  checkDuplicateURL: 'https://71yegno641.execute-api.us-east-1.amazonaws.com/Deployment/check-duplicate',
-  uploadImageURL: 'https://np39lyhj20.execute-api.us-east-1.amazonaws.com/Deployment/upload-image',
-  uploadKey: 'iNrOCa2tbD8n5KfbAZ2Ct7ABHEKrBDVQ67XDlDIR',
-  blockKey: '5neH4EMngs2o2thyfNHkw2PTUzBUqMN782dC58e2',
-  checkDuplicateKey: 'UGnuPquBcp8GZHhRzg3Rs6CR9TXcap5zmF9edDh0',
+  baseURL: process.env.EXPO_PUBLIC_API_BASE_URL || 'YOUR_API_BASE_URL',
+  checkDuplicateURL: process.env.EXPO_PUBLIC_CHECK_DUPLICATE_URL || 'YOUR_CHECK_DUPLICATE_URL',
+  uploadImageURL: process.env.EXPO_PUBLIC_UPLOAD_IMAGE_URL || 'YOUR_UPLOAD_IMAGE_URL',
+  uploadKey: process.env.EXPO_PUBLIC_UPLOAD_API_KEY || 'YOUR_UPLOAD_API_KEY',
+  blockKey: process.env.EXPO_PUBLIC_BLOCK_API_KEY || 'YOUR_BLOCK_API_KEY',
+  checkDuplicateKey: process.env.EXPO_PUBLIC_CHECK_DUPLICATE_API_KEY || 'YOUR_CHECK_DUPLICATE_API_KEY',
   timeout: 15000,
   
   async request(endpoint, options = {}) {
@@ -93,35 +93,39 @@ export const api = {
 
 
 const awsConfig = {
-  // AWS Credentials - Replace with actual values
-  accessKeyId: 'AKIAIOSFODNN7EXAMPLE', // Replace with actual access key
-  secretAccessKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY', // Replace with actual secret key
-  sessionToken: '', // Optional for temporary credentials
-  region: 'us-east-1',
+  // AWS Credentials - Use environment variables
+  accessKeyId: process.env.EXPO_PUBLIC_AWS_ACCESS_KEY_ID || 'YOUR_AWS_ACCESS_KEY_ID',
+  secretAccessKey: process.env.EXPO_PUBLIC_AWS_SECRET_ACCESS_KEY || 'YOUR_AWS_SECRET_ACCESS_KEY',
+  sessionToken: process.env.EXPO_PUBLIC_AWS_SESSION_TOKEN || '',
+  region: process.env.EXPO_PUBLIC_AWS_REGION || process.env.AWS_REGION || 'us-east-1',
   
   s3: {
-    bucketName: '2314823894myawsbucket',
-    region: 'us-east-1',
+    bucketName: process.env.EXPO_PUBLIC_S3_BUCKET || process.env.S3_BUCKET || 'YOUR_S3_BUCKET_NAME',
+    region: process.env.EXPO_PUBLIC_AWS_REGION || process.env.AWS_REGION || 'us-east-1',
     imagesPath: "images/",
-    baseURL: 'https://2314823894myawsbucket.s3.us-east-1.amazonaws.com/images/',
+    baseURL: process.env.EXPO_PUBLIC_S3_BASE_URL || 'YOUR_S3_BASE_URL',
   },
+  
+  // Bundi Presign API configuration
+  presignUrl: process.env.EXPO_PUBLIC_PRESIGN_ENDPOINT || process.env.PRESIGN_ENDPOINT || 'YOUR_PRESIGN_ENDPOINT',
+  presignApiKey: process.env.EXPO_PUBLIC_PRESIGN_API_KEY || 'YOUR_PRESIGN_API_KEY',
   
   apiGateway: {
     upload: {
-      url: 'https://np39lyhj20.execute-api.us-east-1.amazonaws.com/Deployment/upload-image',
-      apiKey: 'iNrOCa2tbD8n5KfbAZ2Ct7ABHEKrBDVQ67XDlDIR',
+      url: process.env.EXPO_PUBLIC_UPLOAD_API_URL || 'YOUR_UPLOAD_API_URL',
+      apiKey: process.env.EXPO_PUBLIC_UPLOAD_API_KEY || 'YOUR_UPLOAD_API_KEY',
     },
     getTag: {
-      url: 'https://zudiexk4c3.execute-api.us-east-1.amazonaws.com/Stage1/get-tag',
-      apiKey: '5Zkh0awDm033cqrQM0iCQ9hclI5eUGH679MYJetu',
+      url: process.env.EXPO_PUBLIC_GET_TAG_API_URL || 'YOUR_GET_TAG_API_URL',
+      apiKey: process.env.EXPO_PUBLIC_GET_TAG_API_KEY || 'YOUR_GET_TAG_API_KEY',
     },
     blockImage: {
-      url: 'https://ecf3rgso5g.execute-api.us-east-1.amazonaws.com/Stage1/block-image',
-      apiKey: 'iNrOCa2tbD8n5KfbAZ2Ct7ABHEKrBDVQ67XDlDIR',
+      url: process.env.EXPO_PUBLIC_BLOCK_IMAGE_API_URL || 'YOUR_BLOCK_IMAGE_API_URL',
+      apiKey: process.env.EXPO_PUBLIC_BLOCK_IMAGE_API_KEY || 'YOUR_BLOCK_IMAGE_API_KEY',
     },
     checkDuplicate: {
-      url: 'https://71yegno641.execute-api.us-east-1.amazonaws.com/Deployment/check-duplicate',
-      apiKey: 'UGnuPquBcp8GZHhRzg3Rs6CR9TXcap5zmF9edDh0',
+      url: process.env.EXPO_PUBLIC_CHECK_DUPLICATE_API_URL || 'YOUR_CHECK_DUPLICATE_API_URL',
+      apiKey: process.env.EXPO_PUBLIC_CHECK_DUPLICATE_API_KEY || 'YOUR_CHECK_DUPLICATE_API_KEY',
     },
   },
   
@@ -135,9 +139,9 @@ const awsConfig = {
         memorySize: 256,
         environment: {
           AWS_REGION: 'us-east-1',
-          AWS_BUCKET: '2314823894myawsbucket',
+          AWS_BUCKET: process.env.EXPO_PUBLIC_S3_BUCKET || 'YOUR_S3_BUCKET',
           S3_IMAGES_PATH: 'images/',
-          DYNAMODB_TABLE: 'ImageSignatures',
+          DYNAMODB_TABLE: process.env.EXPO_PUBLIC_DYNAMODB_TABLE || 'YOUR_DYNAMODB_TABLE',
           DYNAMODB_REGION: 'us-east-1'
         },
         dependencies: [
@@ -163,16 +167,16 @@ const awsConfig = {
   },
   
   dynamoDB: {
-    tableName: "ImageSignatures",
+    tableName: process.env.EXPO_PUBLIC_DYNAMODB_TABLE || "YOUR_DYNAMODB_TABLE",
     region: "us-east-1",
-    endpoint: undefined,
-    getTagApiGateway: 'https://zudiexk4c3.execute-api.us-east-1.amazonaws.com/Stage1',
+    endpoint: process.env.EXPO_PUBLIC_DYNAMODB_ENDPOINT || undefined,
+    getTagApiGateway: process.env.EXPO_PUBLIC_GET_TAG_API_GATEWAY || 'YOUR_GET_TAG_API_GATEWAY',
   },
   
   cognito: {
-    userPoolId: '4tdgefj0529b25if3m3v533pcs',
-    userPoolClientId: 'us-east-1_7xXNrYYMc',
-    identityPoolId: 'us-east-1:b5ca18ce-fdf4-47b0-bc93-c408c1b9f562',
+    userPoolId: process.env.EXPO_PUBLIC_COGNITO_USER_POOL_ID || 'YOUR_COGNITO_USER_POOL_ID',
+    userPoolClientId: process.env.EXPO_PUBLIC_COGNITO_USER_POOL_CLIENT_ID || 'YOUR_COGNITO_USER_POOL_CLIENT_ID',
+    identityPoolId: process.env.EXPO_PUBLIC_COGNITO_IDENTITY_POOL_ID || 'YOUR_COGNITO_IDENTITY_POOL_ID',
     region: "us-east-1",
   },
   

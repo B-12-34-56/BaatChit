@@ -4,13 +4,13 @@ const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { DynamoDBClient, GetItemCommand, UpdateItemCommand, PutItemCommand } = require('@aws-sdk/client-dynamodb');
 const multipart = require('parse-multipart');
 
-// Import AWS configuration from utils
+// Import AWS configuration from environment variables
 const awsConfig = {
-  bucket: '2314823894myawsbucket',
-  region: 'us-east-1',
+  bucket: process.env.AWS_BUCKET || 'YOUR_S3_BUCKET_NAME',
+  region: process.env.AWS_REGION || 'us-east-1',
   dynamodb: {
-    tableName: 'ImageSignatures',
-    region: 'us-east-1',
+    tableName: process.env.DYNAMODB_TABLE || 'YOUR_DYNAMODB_TABLE',
+    region: process.env.AWS_REGION || 'us-east-1',
   },
   s3: {
     imagesPath: 'images/',

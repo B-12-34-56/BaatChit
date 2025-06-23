@@ -1,5 +1,5 @@
-import React, { useContext, useState } from "react";
-import { View, Text, TouchableOpacity } from "react-native";
+import React, { useContext, useState, useEffect } from "react";
+import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet } from "react-native";
 import { Image } from 'expo-image';
 import { ChatContext } from "../context/ChatContext";
 import { useAuthState } from 'react-firebase-hooks/auth';
@@ -11,11 +11,13 @@ const Message = ({ message }) => {
   const [currentUser] = useAuthState(auth);
   const [imageViewerVisible, setImageViewerVisible] = useState(false);
   const [selectedImage, setSelectedImage] = useState(null);
+  const [imageError, setImageError] = useState(null);
+  const [imageLoading, setImageLoading] = useState(!!message.imageUrl);
   
-  const isOwner = currentUser && message.senderUid === currentUser.uid;
+  const isOutgoing = message.senderUid === currentUser?.uid;
   
   const defaultAvatar = 'https://ui-avatars.com/api/?name=User&background=667eea&color=fff&bold=true';
-  const avatarUrl = isOwner
+  const avatarUrl = isOutgoing
     ? (currentUser?.photoURL || defaultAvatar)
     : (data.user?.photoURL || defaultAvatar);
 
@@ -31,118 +33,67 @@ const Message = ({ message }) => {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
+  // Simple image loading check - no need for waitForS3 since images are already uploaded
+  useEffect(() => {
+    if (message.imageUrl) {
+      setImageLoading(true);
+      setImageError(null);
+      
+      // Simple check if image loads successfully
+      const img = new Image();
+      img.onload = () => {
+        setImageLoading(false);
+        setImageError(null);
+      };
+      img.onerror = () => {
+        setImageLoading(false);
+        setImageError('Image failed to load');
+      };
+      img.src = message.imageUrl;
+    }
+  }, [message.imageUrl]);
+
   return (
     <>
-      <View style={{
-        flexDirection: isOwner ? 'row-reverse' : 'row',
-        alignItems: 'flex-end',
-        marginBottom: 18,
-        paddingHorizontal: 14,
-      }}>
-        <View style={{ 
-          alignItems: isOwner ? 'flex-end' : 'flex-start',
-          marginHorizontal: 14,
-        }}>
-          <Image
-            source={{ uri: avatarUrl }}
-            style={{
-              width: 38,
-              height: 38,
-              borderRadius: 19,
-              marginBottom: 4,
-            }}
-            contentFit="cover"
-          />
-          <Text style={{ 
-            fontSize: 11, 
-            color: '#aaa', 
-            marginTop: 2 
-          }}>
-            {formatTime(message.createdAt)}
-          </Text>
-        </View>
-        
-        <View style={{
-          maxWidth: 280,
-          backgroundColor: isOwner ? '#667eea' : '#f7f8fa',
-          borderRadius: isOwner ? 16 : 16,
-          borderTopLeftRadius: isOwner ? 16 : 4,
-          borderTopRightRadius: isOwner ? 4 : 16,
-          paddingHorizontal: 18,
-          paddingVertical: 12,
-          shadowColor: '#2c3e50',
-          shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.08,
-          shadowRadius: 8,
-          elevation: 3,
-        }}>
-          {message.text && !message.text.startsWith('[Image:') && (
-            <Text style={{ 
-              color: isOwner ? 'white' : '#222',
-              fontSize: 15,
-              fontWeight: '500',
-              lineHeight: 20,
-            }}>
-              {message.text}
-            </Text>
+      <View
+        style={{
+          flexDirection: 'row',
+          justifyContent: isOutgoing ? 'flex-end' : 'flex-start',
+          marginVertical: 6,
+          paddingHorizontal: 10,
+        }}
+      >
+        <View style={[
+          styles.bubble,
+          isOutgoing ? styles.outgoing : styles.incoming
+        ]}>
+          {/* TEXT (if any) */}
+          {!!message.text && (
+            <Text style={[styles.text, isOutgoing ? styles.textOutgoing : styles.textIncoming]}>{message.text}</Text>
           )}
-          
-          {message.type === 'image' && message.imageUrl && (
-            <View style={{ 
-              marginTop: message.text && !message.text.startsWith('[Image:') ? 8 : 0 
-            }}>
-              <TouchableOpacity 
-                onPress={() => handleImagePress(message.imageUrl)}
-                activeOpacity={0.9}
-              >
-                <Image 
-                  source={{ uri: message.imageUrl }}
-                  style={{ 
-                    width: 220, 
-                    height: 150,
-                    borderRadius: 10,
-                    backgroundColor: '#e0e0e0',
-                  }}
-                  contentFit="cover"
-                  onError={(error) => {
-                    console.log('Image load error in Message.jsx:', {
-                      uri: message.imageUrl,
-                      errorMessage: error?.error,
-                    });
-                  }}
-                />
-              </TouchableOpacity>
-              {message.imageTag && (
-                <Text style={{ 
-                  marginTop: 4,
-                  fontSize: 11,
-                  fontWeight: '600',
-                  color: message.imageTag === 'duplicate' ? '#ff9800' : '#4caf50',
-                  textAlign: 'center',
-                  textTransform: 'uppercase'
-                }}>
-                  [{message.imageTag}]
+
+          {/* IMAGE (if any) */}
+          {message.imageUrl && (
+            <>
+              {imageLoading && <ActivityIndicator size="small" />}
+              {imageError && (
+                <Text style={styles.error}>
+                  {imageError}
                 </Text>
               )}
-            </View>
-          )}
-          
-          {message.img && !message.imageUrl && (
-            <TouchableOpacity 
-              onPress={() => handleImagePress(message.img)}
-              activeOpacity={0.9}
-            >
-              <Image 
-                source={{ uri: message.img }}
-                style={{ 
-                  marginTop: 8, 
-                  width: 220, 
-                  height: 150,
-                  borderRadius: 10,
-                }}
-                contentFit="cover"
-              />
-            </TouchableOpacity>
+              {!imageLoading && !imageError && (
+                <TouchableOpacity 
+                  onPress={() => handleImagePress(message.imageUrl)}
+                  activeOpacity={0.9}
+                >
+                  <Image
+                    source={{ uri: message.imageUrl }}
+                    style={styles.image}
+                    contentFit="cover"
+                  />
+                </TouchableOpacity>
+              )}
+            </>
           )}
         </View>
       </View>
@@ -158,5 +109,46 @@ const Message = ({ message }) => {
     </>
   );
 };
+
+const styles = StyleSheet.create({
+  bubble: {
+    marginVertical: 2,
+    padding: 10,
+    borderRadius: 16,
+    maxWidth: '80%',
+    minWidth: 40,
+  },
+  outgoing: {
+    alignSelf: 'flex-end',
+    backgroundColor: '#667eea',
+    borderTopRightRadius: 4,
+  },
+  incoming: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#e5e5ea',
+    borderTopLeftRadius: 4,
+  },
+  text: {
+    fontSize: 16,
+    lineHeight: 22,
+    marginBottom: 2,
+  },
+  textOutgoing: {
+    color: '#fff',
+  },
+  textIncoming: {
+    color: '#222',
+  },
+  error: { 
+    color: '#f88', 
+    fontSize: 12 
+  },
+  image: { 
+    width: 160, 
+    height: 160, 
+    borderRadius: 8, 
+    marginTop: 4 
+  },
+});
 
 export default Message;

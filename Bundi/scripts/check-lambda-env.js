@@ -1,4 +1,5 @@
 const AWS = require('aws-sdk');
+const { LambdaClient, GetFunctionConfigurationCommand } = require('@aws-sdk/client-lambda');
 
 // Configure AWS
 AWS.config.update({
@@ -7,109 +8,90 @@ AWS.config.update({
 
 const lambda = new AWS.Lambda();
 
-// Use environment variables instead of hardcoded credentials
-const AWS_ACCESS_KEY_ID = 'AKIAIOSFODNN7EXAMPLE';
-const AWS_SECRET_ACCESS_KEY = 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY';
-const AWS_SESSION_TOKEN = '';
-const AWS_REGION = 'us-east-1';
-const AWS_BUCKET = '2314823894myawsbucket';
+// Configuration - Use environment variables
+const AWS_REGION = process.env.AWS_REGION || 'us-east-1';
+const AWS_BUCKET = process.env.AWS_BUCKET || 'YOUR_S3_BUCKET_NAME';
 const DYNAMODB_TABLE = 'ImageSignatures';
 
-async function checkLambdaEnvironment() {
+const lambdaClient = new LambdaClient({ region: AWS_REGION });
+
+async function checkLambdaEnvironment(functionName) {
   try {
-    console.log('🔍 Checking Lambda Environment Variables...\n');
+    console.log(`🔍 Checking environment for Lambda function: ${functionName}`);
     
-    // List Lambda functions
-    const functions = await lambda.listFunctions().promise();
-    console.log('📋 Found Lambda functions:');
-    functions.Functions.forEach(func => {
-      console.log(`  - ${func.FunctionName} (Runtime: ${func.Runtime})`);
+    const command = new GetFunctionConfigurationCommand({
+      FunctionName: functionName
     });
     
-    // Check specific functions that might be related to image upload
-    const functionNames = [
-      'upload-image-handler',
-      'uploadImageHandler',
-      'image-upload-handler',
-      'test-echo-handler'
-    ];
+    const response = await lambdaClient.send(command);
     
-    for (const functionName of functionNames) {
-      try {
-        console.log(`\n🔍 Checking function: ${functionName}`);
-        
-        const functionConfig = await lambda.getFunctionConfiguration({
-          FunctionName: functionName
-        }).promise();
-        
-        console.log(`  Function Name: ${functionConfig.FunctionName}`);
-        console.log(`  Runtime: ${functionConfig.Runtime}`);
-        console.log(`  Handler: ${functionConfig.Handler}`);
-        console.log(`  Last Modified: ${functionConfig.LastModified}`);
-        console.log(`  Code Size: ${functionConfig.CodeSize} bytes`);
-        
-        // Check environment variables
-        if (functionConfig.Environment && functionConfig.Environment.Variables) {
-          console.log('  Environment Variables:');
-          const expectedEnvVars = {
-            'AWS_REGION': 'us-east-1',
-            'AWS_BUCKET': '2314823894myawsbucket',
-            'S3_IMAGES_PATH': 'images/',
-            'DYNAMODB_TABLE': 'ImageSignatures',
-            'DYNAMODB_REGION': 'us-east-1'
-          };
-          
-          for (const [key, expectedValue] of Object.entries(expectedEnvVars)) {
-            const actualValue = functionConfig.Environment.Variables[key];
-            const status = actualValue === expectedValue ? '✅' : '❌';
-            console.log(`    ${status} ${key}: ${actualValue || 'NOT SET'} ${actualValue !== expectedValue ? `(expected: ${expectedValue})` : ''}`);
-          }
-          
-          // Show all other environment variables
-          for (const [key, value] of Object.entries(functionConfig.Environment.Variables)) {
-            if (!expectedEnvVars.hasOwnProperty(key)) {
-              console.log(`    ℹ️  ${key}: ${value}`);
-            }
-          }
-        } else {
-          console.log('  ❌ No environment variables set');
-        }
-        
-        // Check function URL if available
-        try {
-          const functionUrl = await lambda.getFunctionUrlConfig({
-            FunctionName: functionName
-          }).promise();
-          console.log(`  Function URL: ${functionUrl.FunctionUrl}`);
-        } catch (urlError) {
-          console.log('  ℹ️  No function URL configured');
-        }
-        
-      } catch (funcError) {
-        if (funcError.code === 'ResourceNotFoundException') {
-          console.log(`  ℹ️  Function ${functionName} not found`);
-        } else {
-          console.log(`  ❌ Error checking function: ${funcError.message}`);
-        }
-      }
+    console.log(`✅ Function found: ${response.FunctionName}`);
+    console.log(`📋 Runtime: ${response.Runtime}`);
+    console.log(`⏱️  Timeout: ${response.Timeout}s`);
+    console.log(`💾 Memory: ${response.MemorySize}MB`);
+    console.log(`🔗 Handler: ${response.Handler}`);
+    
+    if (response.Environment && response.Environment.Variables) {
+      console.log('\n🔧 Environment Variables:');
+      Object.entries(response.Environment.Variables).forEach(([key, value]) => {
+        // Mask sensitive values
+        const maskedValue = key.toLowerCase().includes('key') || key.toLowerCase().includes('secret') || key.toLowerCase().includes('token')
+          ? `${value.substring(0, 8)}...`
+          : value;
+        console.log(`   ${key}: ${maskedValue}`);
+      });
+    } else {
+      console.log('\n⚠️  No environment variables found');
     }
     
+    return response;
+    
   } catch (error) {
-    console.error('❌ Error checking Lambda environment:', error);
+    console.error(`❌ Error checking function ${functionName}:`, error.message);
+    return null;
   }
 }
 
-// Run the check
-if (require.main === module) {
-  checkLambdaEnvironment()
-    .then(() => {
-      console.log('\n✅ Lambda environment check completed!');
-      process.exit(0);
-    })
-    .catch((error) => {
-      console.error('💥 Lambda environment check failed:', error.message);
-      process.exit(1);
-    });
+async function main() {
+  console.log('🚀 Lambda Environment Checker\n');
+  
+  // List of functions to check
+  const functions = [
+    'upload-image',
+    'check-duplicate',
+    'block-image',
+    'get-tag',
+    'bundipresign'
+  ];
+  
+  // Expected environment variables
+  const expectedEnvVars = {
+    'AWS_REGION': AWS_REGION,
+    'AWS_BUCKET': AWS_BUCKET,
+    'DYNAMODB_TABLE': 'YOUR_DYNAMODB_TABLE',
+    'UPLOAD_API_URL': 'YOUR_UPLOAD_API_URL',
+    'UPLOAD_API_KEY': 'YOUR_UPLOAD_API_KEY',
+    'BLOCK_API_URL': 'YOUR_BLOCK_API_URL',
+    'BLOCK_API_KEY': 'YOUR_BLOCK_API_KEY',
+    'CHECK_DUPLICATE_API_URL': 'YOUR_CHECK_DUPLICATE_API_URL',
+    'CHECK_DUPLICATE_API_KEY': 'YOUR_CHECK_DUPLICATE_API_KEY'
+  };
+  
+  console.log('📋 Expected Environment Variables:');
+  Object.entries(expectedEnvVars).forEach(([key, value]) => {
+    console.log(`   ${key}: ${value}`);
+  });
+  
+  console.log('\n' + '='.repeat(50) + '\n');
+  
+  for (const functionName of functions) {
+    await checkLambdaEnvironment(functionName);
+    console.log('\n' + '-'.repeat(30) + '\n');
+  }
+  
+  console.log('✅ Environment check complete!');
 }
+
+main().catch(console.error);
 
 module.exports = { checkLambdaEnvironment }; 

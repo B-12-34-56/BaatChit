@@ -5,49 +5,51 @@
             "Sid": "PublicReadGetObject",
             "Effect": "Allow",
             "Principal": "*",
-                "Action": "s3:GetObject",
-                "Resource": "arn:aws:s3:::2314823894myawsbucket/images/*"
+            "Action": "s3:GetObject",
+            "Resource": "arn:aws:s3:::YOUR_S3_BUCKET_NAME/images/*"
+        },
+        {
+            "Sid": "AllowAuthenticatedUploads",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam::339874238091:user/ibrahim"
             },
-            {
-                "Sid": "AllowAuthenticatedUploads",
-                "Effect": "Allow",
-                "Principal": {
-                    "AWS": "arn:aws:iam::339874238091:user/ibrahim"
-                },
-                "Action": [
-                    "s3:PutObject",
-                    "s3:PutObjectAcl"
-                ],
-                "Resource": "arn:aws:s3:::2314823894myawsbucket/images/*"
+            "Action": [
+                "s3:PutObject",
+                "s3:PutObjectAcl"
+            ],
+            "Resource": "arn:aws:s3:::YOUR_S3_BUCKET_NAME/images/*"
+        },
+        {
+            "Sid": "AllowPresignedUrlUploads",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam::YOUR_ACCOUNT_ID:role/YOUR_LAMBDA_EXECUTION_ROLE"
             },
-            {
-                "Sid": "AllowPresignedUrlUploads",
-                "Effect": "Allow",
-                "Principal": "*",
-                "Action": "s3:PutObject",
-                "Resource": "arn:aws:s3:::2314823894myawsbucket/images/*",
-                "Condition": {
-                    "StringEquals": {
-                        "s3:x-amz-acl": "public-read"
-                    }
-                }
+            "Action": [
+                "s3:PutObject",
+                "s3:PutObjectAcl"
+            ],
+            "Resource": "arn:aws:s3:::YOUR_S3_BUCKET_NAME/images/*"
+        },
+        {
+            "Sid": "AllowLambdaExecutionRole",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam::YOUR_ACCOUNT_ID:role/YOUR_LAMBDA_EXECUTION_ROLE"
             },
-                {
-                "Sid": "AllowLambdaUploads",    
-                "Effect": "Allow",
-                "Principal": {
-                    "Service": "lambda.amazonaws.com"
-                },
-                "Action": [
-                    "s3:PutObject",
-                    "s3:PutObjectAcl"
-                ],
-                "Resource": "arn:aws:s3:::2314823894myawsbucket/images/*",
-                "Condition": {
-                    "StringEquals": {
-                        "aws:SourceAccount": "339874238091"
-                    }
+            "Action": [
+                "s3:GetObject",
+                "s3:PutObject",
+                "s3:DeleteObject",
+                "s3:PutObjectAcl"
+            ],
+            "Resource": "arn:aws:s3:::YOUR_S3_BUCKET_NAME/images/*",
+            "Condition": {
+                "StringEquals": {
+                    "aws:PrincipalArn": "arn:aws:iam::YOUR_ACCOUNT_ID:role/YOUR_LAMBDA_EXECUTION_ROLE"
                 }
             }
-        ]
-    }
+        }
+    ]
+}

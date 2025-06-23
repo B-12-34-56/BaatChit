@@ -1,11 +1,11 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'IAM Policies for Presigned URL Upload System'
+Description: 'IAM Policies for Bundi App'
 
 Parameters:
   S3BucketName:
     Type: String
-    Description: 'Name of the S3 bucket'
-    Default: '2314823894myawsbucket'
+    Description: 'Name of the S3 bucket for storing images'
+    Default: 'YOUR_S3_BUCKET_NAME'
   
   DynamoDBTableName:
     Type: String
